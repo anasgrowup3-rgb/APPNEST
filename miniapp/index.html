@@ -1,0 +1,370 @@
+cd ~/APPNEST/miniapp
+cat > index.html <<'EOF'
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#09090f">
+  <meta name="description" content="APPNEST — каталог Android-приложений">
+  <title>APPNEST — Discover Apps</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="./style.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="./script.js" defer></script>
+</head>
+
+<body>
+  <div class="app-shell" id="app">
+
+    <!-- Loading -->
+    <div class="loading-screen" id="loadingScreen">
+      <div class="loading-logo">A<span>.</span></div>
+      <div class="loading-spinner"></div>
+      <p>Подготавливаем APPNEST</p>
+    </div>
+
+    <!-- Header -->
+    <header class="topbar">
+      <a class="brand" href="#" data-page="home" aria-label="APPNEST Home">
+        <span class="brand-mark">A<span>.</span></span>
+        <span class="brand-name">APPNEST</span>
+      </a>
+
+      <div class="header-actions">
+        <button class="icon-button" id="notificationButton" aria-label="Уведомления">
+          <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
+          <span class="notification-dot" id="notificationDot"></span>
+        </button>
+        <button class="avatar-button" id="headerAvatar" aria-label="Профиль">
+          <img id="headerAvatarImage" alt="" hidden>
+          <span id="headerAvatarLetter">U</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="main-content">
+
+      <!-- HOME -->
+      <section class="page active" id="page-home" data-page="home">
+        <div class="welcome-block">
+          <div>
+            <span class="eyebrow">YOUR APP DISCOVERY SPACE</span>
+            <h1>Открой что-то<br><span>новое.</span></h1>
+            <p class="welcome-subtitle" id="welcomeSubtitle">Лучшие приложения в одном месте.</p>
+          </div>
+          <div class="hero-orb" aria-hidden="true">
+            <div class="orb-inner"></div>
+          </div>
+        </div>
+
+        <form class="search-box" id="homeSearchForm">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+          <input id="homeSearch" type="search" placeholder="Найти приложение..." autocomplete="off">
+          <button type="submit" aria-label="Искать">Найти</button>
+        </form>
+
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">EXPLORE</span>
+            <h2>Категории</h2>
+          </div>
+          <button class="text-button" data-page="catalog">Все <span>→</span></button>
+        </div>
+
+        <div class="category-grid" id="categoryGrid">
+          <button class="category-card" data-category="productivity">
+            <span class="category-icon purple">✦</span>
+            <span>Продуктивность</span>
+          </button>
+          <button class="category-card" data-category="games">
+            <span class="category-icon orange">◈</span>
+            <span>Игры</span>
+          </button>
+          <button class="category-card" data-category="tools">
+            <span class="category-icon blue">⌘</span>
+            <span>Инструменты</span>
+          </button>
+          <button class="category-card" data-category="other">
+            <span class="category-icon green">◇</span>
+            <span>Другое</span>
+          </button>
+        </div>
+
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">HANDPICKED</span>
+            <h2>Популярное</h2>
+          </div>
+          <button class="text-button" data-page="catalog">Каталог <span>→</span></button>
+        </div>
+        <div class="app-list" id="popularApps">
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+        </div>
+
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">FRESH ARRIVALS</span>
+            <h2>Недавно добавлены</h2>
+          </div>
+        </div>
+        <div class="app-list" id="recentApps">
+          <div class="skeleton-card"></div>
+        </div>
+
+        <div class="home-footer">
+          <span class="footer-symbol">A.</span>
+          <div>
+            <strong>APPNEST</strong>
+            <p>Discover. Download. Experience.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- CATALOG -->
+      <section class="page" id="page-catalog" data-page="catalog">
+        <div class="page-heading">
+          <span class="eyebrow">THE COLLECTION</span>
+          <h1>Каталог<span>.</span></h1>
+          <p>Исследуй приложения и находи полезные инструменты.</p>
+        </div>
+
+        <form class="search-box catalog-search" id="catalogSearchForm">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+          <input id="catalogSearch" type="search" placeholder="Название или описание...">
+        </form>
+
+        <div class="catalog-controls">
+          <select id="categoryFilter" aria-label="Категория">
+            <option value="">Все категории</option>
+            <option value="productivity">Продуктивность</option>
+            <option value="games">Игры</option>
+            <option value="tools">Инструменты</option>
+            <option value="other">Другое</option>
+          </select>
+          <select id="sortFilter" aria-label="Сортировка">
+            <option value="newest">Сначала новые</option>
+            <option value="popular">Популярные</option>
+            <option value="name">По названию</option>
+          </select>
+        </div>
+
+        <div class="results-caption">
+          <span id="catalogResultsCount">Приложения</span>
+          <span class="live-indicator">● LIVE CATALOG</span>
+        </div>
+
+        <div class="app-list" id="catalogApps">
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+        </div>
+
+        <button class="load-more-button" id="loadMoreButton" hidden>Загрузить ещё</button>
+        <div class="empty-state" id="catalogEmpty" hidden>
+          <span class="empty-icon">⌕</span>
+          <h3>Ничего не найдено</h3>
+          <p>Попробуй изменить запрос или категорию.</p>
+        </div>
+      </section>
+
+      <!-- FAVORITES -->
+      <section class="page" id="page-favorites" data-page="favorites">
+        <div class="page-heading">
+          <span class="eyebrow">YOUR COLLECTION</span>
+          <h1>Избранное<span>.</span></h1>
+          <p>Приложения, которые ты сохранил.</p>
+        </div>
+        <div class="app-list" id="favoriteApps"></div>
+        <div class="empty-state" id="favoritesEmpty">
+          <span class="empty-icon">♡</span>
+          <h3>Пока здесь пусто</h3>
+          <p>Добавляй приложения в избранное, чтобы быстро находить их.</p>
+          <button class="primary-button" data-page="catalog">Открыть каталог</button>
+        </div>
+      </section>
+
+      <!-- PROFILE -->
+      <section class="page" id="page-profile" data-page="profile">
+        <div class="page-heading">
+          <span class="eyebrow">PERSONAL SPACE</span>
+          <h1>Профиль<span>.</span></h1>
+        </div>
+
+        <div class="profile-card">
+          <div class="profile-avatar" id="profileAvatar">
+            <img id="profileAvatarImage" alt="" hidden>
+            <span id="profileAvatarLetter">U</span>
+          </div>
+          <div class="profile-info">
+            <h2 id="profileName">Пользователь</h2>
+            <p id="profileUsername">Telegram user</p>
+            <span class="profile-status"><i></i> APPNEST MEMBER</span>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <strong id="favoriteCount">0</strong>
+            <span>Избранное</span>
+          </div>
+          <div class="stat-card">
+            <strong id="downloadCount">0</strong>
+            <span>Скачивания</span>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <span class="eyebrow">PREFERENCES</span>
+          <h3>Настройки</h3>
+          <div class="setting-row">
+            <div>
+              <strong>Язык приложения</strong>
+              <small>Выбери удобный язык</small>
+            </div>
+            <select id="languageSelect" aria-label="Язык">
+              <option value="ru">Русский</option>
+              <option value="tj">Тоҷикӣ</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <button class="setting-row setting-button" id="historyButton">
+            <span><strong>История скачиваний</strong><small>Твои последние загрузки</small></span>
+            <span>→</span>
+          </button>
+          <button class="setting-row setting-button" id="feedbackButton">
+            <span><strong>Обратная связь</strong><small>Сообщить о проблеме или предложить идею</small></span>
+            <span>→</span>
+          </button>
+          <button class="setting-row setting-button" id="contactButton">
+            <span><strong>Связаться с нами</strong><small>@Appnest1_bot</small></span>
+            <span>↗</span>
+          </button>
+        </div>
+
+        <div class="admin-entry" id="adminEntry" hidden>
+          <span class="eyebrow">MANAGEMENT</span>
+          <h3>Администрирование</h3>
+          <p>Управление каталогом и платформой.</p>
+          <button class="primary-button" data-page="admin">Открыть панель управления</button>
+        </div>
+
+        <div class="about-block">
+          <strong>APPNEST <span>v1.0</span></strong>
+          <p>Discover. Download. Experience.</p>
+        </div>
+      </section>
+
+      <!-- DOWNLOAD HISTORY -->
+      <section class="page" id="page-history" data-page="history">
+        <div class="page-heading">
+          <button class="back-button" data-page="profile">← Назад</button>
+          <span class="eyebrow">YOUR ACTIVITY</span>
+          <h1>Загрузки<span>.</span></h1>
+        </div>
+        <div class="app-list" id="downloadHistory"></div>
+        <div class="empty-state" id="historyEmpty">
+          <span class="empty-icon">↓</span>
+          <h3>История пока пуста</h3>
+          <p>Здесь появятся приложения, которые ты скачивал.</p>
+        </div>
+      </section>
+
+      <!-- NOTIFICATIONS -->
+      <section class="page" id="page-notifications" data-page="notifications">
+        <div class="page-heading">
+          <button class="back-button" data-page="home">← Назад</button>
+          <span class="eyebrow">STAY UPDATED</span>
+          <h1>Уведомления<span>.</span></h1>
+        </div>
+        <div class="notification-list" id="notificationList"></div>
+        <div class="empty-state" id="notificationsEmpty">
+          <span class="empty-icon">♧</span>
+          <h3>Пока нет уведомлений</h3>
+          <p>Важные новости и обновления появятся здесь.</p>
+        </div>
+      </section>
+
+      <!-- APP DETAILS -->
+      <section class="page" id="page-details" data-page="details">
+        <button class="back-button" id="detailsBackButton">← Назад</button>
+        <div id="appDetailsContent"></div>
+      </section>
+
+      <!-- ADMIN -->
+      <section class="page" id="page-admin" data-page="admin">
+        <div class="page-heading">
+          <span class="eyebrow">CONTROL CENTER</span>
+          <h1>Управление<span>.</span></h1>
+          <p>Административная панель APPNEST.</p>
+        </div>
+
+        <div class="admin-stats-grid" id="adminStats">
+          <div class="stat-card"><strong id="adminAppsCount">—</strong><span>Приложения</span></div>
+          <div class="stat-card"><strong id="adminUsersCount">—</strong><span>Пользователи</span></div>
+          <div class="stat-card"><strong id="adminDownloadsCount">—</strong><span>Скачивания</span></div>
+        </div>
+
+        <div class="admin-tabs">
+          <button class="admin-tab active" data-admin-tab="apps">Приложения</button>
+          <button class="admin-tab" data-admin-tab="feedback">Отзывы</button>
+          <button class="admin-tab" data-admin-tab="stats">Статистика</button>
+        </div>
+
+        <div class="admin-panel active" id="adminPanel-apps">
+          <button class="primary-button full-button" id="addAppButton">＋ Добавить приложение</button>
+          <div class="app-list" id="adminAppsList"></div>
+        </div>
+
+        <div class="admin-panel" id="adminPanel-feedback">
+          <div id="adminFeedbackList"></div>
+        </div>
+
+        <div class="admin-panel" id="adminPanel-stats">
+          <div id="adminAnalytics"></div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom navigation -->
+    <nav class="bottom-nav" id="bottomNav" aria-label="Основная навигация">
+      <button class="nav-item active" data-page="home">
+        <span class="nav-icon">⌂</span>
+        <span>Главная</span>
+      </button>
+      <button class="nav-item" data-page="catalog">
+        <span class="nav-icon">◫</span>
+        <span>Каталог</span>
+      </button>
+      <button class="nav-item" data-page="favorites">
+        <span class="nav-icon">♡</span>
+        <span>Избранное</span>
+      </button>
+      <button class="nav-item" data-page="profile">
+        <span class="nav-icon">◉</span>
+        <span>Профиль</span>
+      </button>
+    </nav>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modalOverlay" hidden>
+      <div class="modal-sheet" id="modalSheet" role="dialog" aria-modal="true">
+        <div class="modal-handle"></div>
+        <button class="modal-close" id="modalClose" aria-label="Закрыть">×</button>
+        <div id="modalContent"></div>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+  </div>
+</body>
+</html>
+EOF

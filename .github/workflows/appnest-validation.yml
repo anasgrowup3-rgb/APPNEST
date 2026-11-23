@@ -19,6 +19,7 @@ jobs:
         run: |
           node --check worker/src/index.js
           node --check miniapp/script.js
+          node --check worker/test/real-integration.mjs
           python -m py_compile main.py
       - name: Worker tests
         working-directory: worker

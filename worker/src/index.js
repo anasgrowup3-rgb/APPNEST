@@ -143,8 +143,8 @@ async function uploadOwner(env,id,userId) {
   return await env.DB.prepare("SELECT * FROM upload_sessions WHERE id=? AND owner_id=? AND status='open' AND expires_at>?").bind(id,userId,Math.floor(Date.now()/1000)).first();
 }
 async function mediaObject(env,key) {
-  if(typeof key!=="string"||!key.startsWith("media/")||key.length>200) return null;
-  const {results=[]}=await env.DB.prepare("SELECT icon_key,banner_key,screenshots_json FROM apps WHERE status='published' AND (icon_key=? OR banner_key=? OR screenshots_json LIKE '%media/%')").bind(key,key).all();
+  if(typeof key!=="string"||(!key.startsWith("media/")&&!key.startsWith("icons/"))||key.length>200) return null;
+  const {results=[]}=await env.DB.prepare("SELECT icon_key,banner_key,screenshots_json FROM apps WHERE status='published' AND (icon_key=? OR banner_key=? OR instr(screenshots_json,?)>0)").bind(key,key,key).all();
   const referenced=results.some(app=>app.icon_key===key||app.banner_key===key||safeArray(app.screenshots_json).includes(key));
   if(!referenced) return null;
   return await env.FILES.get(key);

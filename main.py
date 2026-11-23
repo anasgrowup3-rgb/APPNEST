@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 from telebot import types
 
 
-# Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
@@ -28,9 +27,8 @@ WEBAPP_READY = (
 
 bot = telebot.TeleBot(TOKEN)
 
-# Keep the existing database file so saved language preferences survive.
-# The legacy SQLite app catalog is deliberately no longer used: D1 is the
-# single source of truth for applications and the Mini App admin panel.
+# Keep the existing file so saved language preferences survive. The old
+# SQLite application catalog is retired; D1 is the single catalog source.
 DB_PATH = os.path.join(BASE_DIR, "data", "apps.db")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
@@ -62,6 +60,40 @@ def init_db():
 init_db()
 
 
+TEXTS = {
+    "ru": {
+        "welcome": "Добро пожаловать в APPNEST!\n\nОткрывай каталог, изучай приложения и скачивай APK через защищённую систему.",
+        "open": "📱 Открыть APPNEST",
+        "help": "APPNEST — каталог Android-приложений.\n\n/open или /catalog — открыть каталог\n/language — сменить язык\n/id — узнать свой Telegram ID",
+        "not_configured": "Каталог пока не подключён. Администратору нужно настроить WEBAPP_URL в .env.",
+        "open_hint": "Нажми кнопку ниже, чтобы открыть каталог APPNEST.",
+        "language": "Выбери язык:",
+        "id": "Твой Telegram ID: {user_id}",
+        "document": "Загрузка APK через чат отключена. Добавляй приложения и файлы через панель администратора APPNEST.",
+    },
+    "tj": {
+        "welcome": "Ба APPNEST хуш омадед!\n\nКаталогро кушоед, барномаҳоро бинед ва APK-ро тавассути низоми муҳофизатшуда зеркашӣ кунед.",
+        "open": "📱 Кушодани APPNEST",
+        "help": "APPNEST — каталоги барномаҳои Android.\n\n/open ё /catalog — кушодани каталог\n/language — иваз кардани забон\n/id — гирифтани Telegram ID",
+        "not_configured": "Каталог ҳоло пайваст нашудааст. Администратор бояд WEBAPP_URL-ро дар .env танзим кунад.",
+        "open_hint": "Барои кушодани каталоги APPNEST тугмаи поёнро пахш кунед.",
+        "language": "Забонро интихоб кунед:",
+        "id": "Telegram ID-и шумо: {user_id}",
+        "document": "Боркунии APK тавассути чат хомӯш аст. Барномаҳо ва файлҳоро аз панели администратори APPNEST илова кунед.",
+    },
+    "en": {
+        "welcome": "Welcome to APPNEST!\n\nExplore the catalog, discover apps, and download APK files through the protected download system.",
+        "open": "📱 Open APPNEST",
+        "help": "APPNEST is an Android app catalog.\n\n/open or /catalog — open the catalog\n/language — change language\n/id — show your Telegram ID",
+        "not_configured": "The catalog is not connected yet. An administrator must configure WEBAPP_URL in .env.",
+        "open_hint": "Tap the button below to open the APPNEST catalog.",
+        "language": "Choose your language:",
+        "id": "Your Telegram ID: {user_id}",
+        "document": "APK uploads through chat are disabled. Add apps and files through the APPNEST admin panel.",
+    },
+}
+
+
 def get_language(user_id):
     with db() as conn:
         conn.execute(
@@ -84,46 +116,6 @@ def save_language(user_id, language):
             VALUES (?, ?)
             ON CONFLICT(user_id) DO UPDATE SET language = excluded.language
         """, (user_id, language))
-
-
-TEXTS = {
-    "ru": {
-        "welcome": "Добро пожаловать в APPNEST!\n\nОткрывай каталог, изучай приложения и скачивай APK через защищённую систему.",
-        "open": "📱 Открыть APPNEST",
-        "help": "APPNEST — каталог Android-приложений.\n\n/open или /catalog — открыть каталог\n/language — сменить язык\n/id — узнать свой Telegram ID",
-        "not_configured": "Каталог пока не подключён. Администратору нужно настроить WEBAPP_URL в .env.",
-        "admin": "Управление приложениями теперь находится в панели администратора APPNEST. Открой Mini App и войди с аккаунтом администратора.",
-        "open_hint": "Нажми кнопку ниже, чтобы открыть каталог APPNEST.",
-        "language": "Выбери язык:",
-        "language_saved": "Язык изменён на русский.",
-        "id": "Твой Telegram ID: {user_id}",
-        "document": "Загрузка APK через чат отключена. Добавляй приложения и файлы через панель администратора APPNEST.",
-    },
-    "tj": {
-        "welcome": "Ба APPNEST хуш омадед!\n\nКаталогро кушоед, барномаҳоро бинед ва APK-ро тавассути низоми муҳофизатшуда зеркашӣ кунед.",
-        "open": "📱 Кушодани APPNEST",
-        "help": "APPNEST — каталоги барномаҳои Android.\n\n/open ё /catalog — кушодани каталог\n/language — иваз кардани забон\n/id — гирифтани Telegram ID",
-        "not_configured": "Каталог ҳоло пайваст нашудааст. Администратор бояд WEBAPP_URL-ро дар .env танзим кунад.",
-        "admin": "Идоракунии барномаҳо ҳоло дар панели администратори APPNEST ҷойгир аст. Mini App-ро кушоед ва бо ҳисоби администратор ворид шавед.",
-        "open_hint": "Барои кушодани каталоги APPNEST тугмаи поёнро пахш кунед.",
-        "language": "Забонро интихоб кунед:",
-        "language_saved": "Забон ба тоҷикӣ иваз шуд.",
-        "id": "Telegram ID-и шумо: {user_id}",
-        "document": "Боркунии APK тавассути чат хомӯш аст. Барномаҳо ва файлҳоро аз панели администратори APPNEST илова кунед.",
-    },
-    "en": {
-        "welcome": "Welcome to APPNEST!\n\nExplore the catalog, discover apps, and download APK files through the protected download system.",
-        "open": "📱 Open APPNEST",
-        "help": "APPNEST is an Android app catalog.\n\n/open or /catalog — open the catalog\n/language — change language\n/id — show your Telegram ID",
-        "not_configured": "The catalog is not connected yet. An administrator must configure WEBAPP_URL in .env.",
-        "admin": "App management is now available in the APPNEST admin panel. Open the Mini App and sign in with an administrator account.",
-        "open_hint": "Tap the button below to open the APPNEST catalog.",
-        "language": "Choose your language:",
-        "language_saved": "Language changed to English.",
-        "id": "Your Telegram ID: {user_id}",
-        "document": "APK uploads through chat are disabled. Add apps and files through the APPNEST admin panel.",
-    },
-}
 
 
 def webapp_keyboard(language="ru"):
@@ -150,10 +142,9 @@ def language_keyboard():
 def send_welcome(chat_id, user_id):
     language = get_language(user_id)
     text = TEXTS[language]["welcome"]
-    keyboard = webapp_keyboard(language)
     if not WEBAPP_READY:
         text += "\n\n" + TEXTS[language]["not_configured"]
-    bot.send_message(chat_id, text, reply_markup=keyboard)
+    bot.send_message(chat_id, text, reply_markup=webapp_keyboard(language))
 
 
 def open_mini_app(message):
@@ -194,7 +185,6 @@ def choose_language(call):
     if language not in TEXTS:
         bot.answer_callback_query(call.id, "Unknown language")
         return
-
     save_language(call.from_user.id, language)
     bot.answer_callback_query(call.id)
     send_welcome(call.message.chat.id, call.from_user.id)
@@ -221,8 +211,7 @@ def get_id(message):
 
 @bot.message_handler(commands=["addapp", "editapp", "deleteapp", "apps", "stats"])
 def legacy_admin_commands(message):
-    # These legacy commands used a separate SQLite catalog and are retired.
-    # All catalog administration now goes through the authenticated Mini App.
+    # Legacy commands now open the single authenticated admin interface.
     open_mini_app(message)
 
 
@@ -234,9 +223,8 @@ def reject_chat_upload(message):
 
 @bot.message_handler(content_types=["text"])
 def text_fallback(message):
-    if not message.text or message.text.startswith("/"):
-        return
-    open_mini_app(message)
+    if message.text and not message.text.startswith("/"):
+        open_mini_app(message)
 
 
 def register_commands():
@@ -251,7 +239,7 @@ def register_commands():
     try:
         bot.set_my_commands(commands)
     except Exception as error:
-        # A temporary Telegram API issue should not prevent polling from starting.
+        # A temporary Telegram API issue must not prevent polling from starting.
         print("Не удалось обновить меню команд Telegram:", type(error).__name__)
 
 

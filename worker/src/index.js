@@ -131,7 +131,7 @@ async function handle(request, env) {
     if (query) { sql += " AND (title LIKE ? OR description LIKE ? OR developer LIKE ?)"; args.push("%"+query+"%","%"+query+"%","%"+query+"%"); }
     sql += " ORDER BY created_at DESC LIMIT 100";
     const { results = [] } = await env.DB.prepare(sql).bind(...args).all();
-    return json({ success: true, apps: results.map(a => ({ ...a, size: a.size_bytes ? (a.size_bytes / 1048576).toFixed(1) + " MB" : null, icon_url: a.icon_key ? "/api/media/" + encodeURIComponent(a.icon_key) : null, screenshots: safeArray(a.screenshots_json) })) });
+    return json({ success: true, apps: results.map(a => ({ ...a, size: a.size_bytes ? (a.size_bytes / 1048576).toFixed(1) + " MB" : null, icon_url: a.icon_key ? "/api/media/" + encodeURIComponent(a.icon_key) : null, banner_url: a.banner_key ? "/api/media/" + encodeURIComponent(a.banner_key) : null, screenshots: safeArray(a.screenshots_json).map(key=>"/api/media/"+encodeURIComponent(key)) })) });
   }
   if (path.startsWith("/media/") && method === "GET") {
     if (!env.FILES) return fail("R2 binding FILES не настроен", 503);
@@ -167,6 +167,7 @@ async function handle(request, env) {
     }
     if (method === "DELETE") { await env.DB.prepare("DELETE FROM favorites WHERE user_id=? AND app_id=?").bind(userId,appId).run(); return json({success:true}); }
   }
+  if (path.startsWith("/apps/") && path.endsWith("/versions") && method === "GET") { const id=Number(path.split("/")[2]); const {results=[]}=await env.DB.prepare("SELECT version,version_code,min_android,size_bytes,release_notes,created_at FROM app_versions WHERE app_id=? ORDER BY version_code DESC LIMIT 30").bind(id).all(); return json({success:true,versions:results}); }
   if (path.startsWith("/apps/") && path.endsWith("/download") && method === "POST") {
     const appId = Number(path.split("/")[2]);
     const app = await env.DB.prepare("SELECT id,apk_key,apk_sha256,title FROM apps WHERE id=? AND status='published'").bind(appId).first();
@@ -340,6 +341,10 @@ async function handle(request, env) {
       await env.DB.prepare("UPDATE feedback SET status=? WHERE id=?").bind(b.status,id).run(); await audit(env,userId,"feedback.update",String(id)); return json({success:true});
     }
 
+    if (path === "/admin/users" && method === "GET") {
+      const {results=[]}=await env.DB.prepare("SELECT telegram_id,username,first_name,is_blocked,created_at,last_seen FROM users ORDER BY last_seen DESC LIMIT 200").all();
+      return json({success:true,users:results});
+    }
     if (path === "/admin/overview" && method === "GET") {
       const [apps,users,downloads,feedback,allApps,ads,channels] = await Promise.all([
         env.DB.prepare("SELECT COUNT(*) n FROM apps WHERE status='published'").first(),

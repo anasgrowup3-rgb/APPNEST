@@ -181,7 +181,7 @@ async function handle(request, env) {
       env.DB.prepare("SELECT id,title,message,created_at FROM notifications WHERE active=1 ORDER BY created_at DESC LIMIT 30").all(),
       env.DB.prepare("SELECT language FROM users WHERE telegram_id=?").bind(userId).first()
     ]);
-    return json({ success:true, user:session.user, language:language?.language || "ru", is_admin:session.isAdmin, favorites:(favs.results||[]).map(x=>String(x.app_id)), history:history.results||[], notifications:notes[0].results||[] });
+    return json({ success:true, user:session.user, language:language?.language || "ru", is_admin:session.isAdmin, favorites:(favs.results||[]).map(x=>String(x.app_id)), history:history.results||[], notifications:notes.results||[] });
   }
   if (path === "/me" && method === "PATCH") {
     const b=await readJson(request); if(!["ru","tj","en"].includes(b.language)) return fail("Unsupported language");

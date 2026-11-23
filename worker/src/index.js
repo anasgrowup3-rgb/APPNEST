@@ -421,8 +421,15 @@ async function handle(request, env) {
     }
     if (path.startsWith("/admin/ads/") && method === "PATCH") {
       const id=Number(path.split("/")[3]),b=await readJson(request);
-      if(typeof b.active!=="boolean") return fail("active должен быть boolean");
-      await env.DB.prepare("UPDATE ad_campaigns SET active=? WHERE id=?").bind(b.active?1:0,id).run(); await audit(env,userId,"ad.toggle",String(id)); return json({success:true});
+      if(!Number.isSafeInteger(id)||id<1) return fail("Некорректная кампания");
+      if(Object.keys(b).length===1&&typeof b.active==="boolean"){
+        await env.DB.prepare("UPDATE ad_campaigns SET active=? WHERE id=?").bind(b.active?1:0,id).run();
+        await audit(env,userId,"ad.toggle",String(id)); return json({success:true});
+      }
+      const title=clean(b.title,120),kind=clean(b.kind,40),creative=clean(b.creative_url,1000),target=clean(b.target_url,1000),starts=clean(b.starts_at,40),ends=clean(b.ends_at,40);
+      if(!title||!["banner","channel","task"].includes(kind)||!validHttpUrl(target)||(creative&&!validHttpUrl(creative))||!starts||!ends||!Number.isFinite(Date.parse(starts))||!Number.isFinite(Date.parse(ends))||new Date(starts)>=new Date(ends)) return fail("Некорректные параметры кампании");
+      await env.DB.prepare("UPDATE ad_campaigns SET title=?,kind=?,creative_url=?,target_url=?,starts_at=?,ends_at=?,priority=? WHERE id=?").bind(title,kind,creative,target,starts,ends,Number(b.priority)||0,id).run();
+      await audit(env,userId,"ad.update",String(id)); return json({success:true});
     }
     if (path.startsWith("/admin/ads/") && method === "DELETE") {
       const id=Number(path.split("/")[3]); await env.DB.prepare("DELETE FROM ad_campaigns WHERE id=?").bind(id).run(); await audit(env,userId,"ad.delete",String(id)); return json({success:true});
@@ -453,7 +460,7 @@ async function handle(request, env) {
         env.DB.prepare("SELECT COUNT(*) n FROM downloads").first(),
         env.DB.prepare("SELECT id,user_id,message,created_at FROM feedback WHERE status='open' ORDER BY created_at DESC LIMIT 50").all(),
         env.DB.prepare("SELECT id,title,description,category,version,downloads,status FROM apps ORDER BY created_at DESC LIMIT 100").all(),
-        env.DB.prepare("SELECT id,title,kind,active,starts_at,ends_at,impressions,clicks FROM ad_campaigns ORDER BY id DESC LIMIT 50").all(),
+        env.DB.prepare("SELECT id,title,kind,creative_url,target_url,active,starts_at,ends_at,priority,impressions,clicks FROM ad_campaigns ORDER BY id DESC LIMIT 50").all(),
         env.DB.prepare("SELECT id,chat_id,title,invite_url,enabled FROM required_channels ORDER BY id").all(),
         env.DB.prepare("SELECT substr(created_at,1,10) day,COUNT(*) count FROM downloads GROUP BY substr(created_at,1,10) ORDER BY day DESC LIMIT 14").all(),
         env.DB.prepare("SELECT value FROM settings WHERE key='subscription_mode'").first()

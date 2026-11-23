@@ -114,7 +114,7 @@
 
     const item = document.createElement("div");
     item.className = "toast";
-    item.textContent = message;
+    item.textContent = translations?.[state.language]?.[message] || message;
     container.append(item);
 
     setTimeout(() => item.remove(), 3200);
@@ -450,7 +450,7 @@
       <article class="app-card">
         <div class="app-card-info">
           <h3>${escapeHTML(item.title || "Приложение")}</h3>
-          <p>${item.date ? new Date(item.date).toLocaleString() : ""}</p>
+          <p>${(item.created_at||item.date) ? new Date(item.created_at||item.date).toLocaleString() : ""}</p>
         </div>
       </article>
     `).join("");
@@ -617,7 +617,8 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
       "На все каналы":"Ба ҳамаи каналҳо","На любой канал":"Ба яке аз каналҳо","Добавить канал":"Илова кардани канал",
       "Новое уведомление":"Огоҳиномаи нав","Опубликованные уведомления":"Огоҳиномаҳои нашршуда",
       "Заблокировать":"Маҳкам кардан","Разблокировать":"Кушодани дастрасӣ","Выключить":"Хомӯш кардан","Включить":"Фаъол кардан",
-      "Удалить":"Нест кардан","Закрыть":"Пӯшидан","Сохранить":"Нигоҳ доштан","Начало":"Оғоз","Окончание":"Анҷом"
+      "Удалить":"Нест кардан","Закрыть":"Пӯшидан","Сохранить":"Нигоҳ доштан","Начало":"Оғоз","Окончание":"Анҷом",
+      "Название":"Ном","Описание":"Тавсиф","Разработчик":"Таҳиягар","Категория":"Категория","Версия":"Версия","Размер":"Андоза","Минимальный Android":"Android-и ҳадди ақал","Что нового":"Чӣ нав аст","APK-файл":"Файли APK","Иконка":"Нишона","Баннер":"Баннер","Скриншоты":"Суратҳои экран","Обновить APK":"Нав кардани APK","Загрузить обновление":"Бор кардани навсозӣ","Проверить снова":"Боз санҷидан","Начало":"Оғоз","Окончание":"Анҷом"
     },
     en: {
       "Главная":"Home","Каталог":"Catalog","Избранное":"Favorites","Профиль":"Profile",
@@ -652,7 +653,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
       "Пользователи":"Users","Уведомления":"Notifications","На все каналы":"All channels","На любой канал":"Any channel",
       "Добавить канал":"Add channel","Новое уведомление":"New notification","Опубликованные уведомления":"Published notifications",
       "Заблокировать":"Block","Разблокировать":"Unblock","Выключить":"Disable","Включить":"Enable",
-      "Удалить":"Delete","Закрыть":"Close","Сохранить":"Save"
+      "Удалить":"Delete","Закрыть":"Close","Сохранить":"Save","Название":"Name","Описание":"Description","Разработчик":"Developer","Категория":"Category","Версия":"Version","Размер":"Size","Минимальный Android":"Minimum Android","Что нового":"Release notes","APK-файл":"APK file","Иконка":"Icon","Баннер":"Banner","Скриншоты":"Screenshots"
     }
   };
   function applyTranslations(root=document) {

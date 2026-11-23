@@ -304,10 +304,11 @@
           ${state.favorites.has(String(app.id ?? app.code)) ? "Убрать из избранного" : "В избранное"}
         </button>
       </div>
+      ${app.banner_url ? `<img class="details-banner" src="${escapeHTML(new URL(app.banner_url,API).href)}" alt="" loading="lazy">` : ""}
       ${app.screenshots?.length ? `
         <div class="screenshots">
           ${app.screenshots.map(src =>
-            `<img src="${escapeHTML(src)}" loading="lazy" alt="Скриншот приложения">`
+            `<img src="${escapeHTML(new URL(src,API).href)}" loading="lazy" alt="Скриншот приложения">`
           ).join("")}
         </div>` : ""}
       ${app.release_notes ? `
@@ -318,6 +319,7 @@
     `;
 
     navigate("details");
+    request("/apps/"+encodeURIComponent(id)+"/versions").then(data=>{const host=$("#appDetailsContent");if(!host||!data.versions?.length)return;const section=document.createElement("section");section.className="release-notes";section.innerHTML="<h3>История версий</h3>"+data.versions.map(v=>`<p><strong>v${escapeHTML(v.version)}</strong> · ${escapeHTML(v.created_at||"")}<br>${escapeHTML(v.release_notes||"")}</p>`).join("");host.append(section);}).catch(()=>{});
   }
 
   async function downloadApp(id) {
@@ -422,6 +424,7 @@
     try {
       const data = await request("/me");
       state.language = data.language || state.language || "ru";
+      if($("#languageSelect")) $("#languageSelect").value=state.language;
       state.user = data.user || null;
       state.isAdmin = data.is_admin === true;
       state.favorites = new Set((data.favorites || []).map(String));
@@ -620,11 +623,11 @@
     }
   };
   function applyTranslations(root=document) {
-    const dict=translations[state.language]; if(!dict) return;
+    const dict=translations[state.language]||{};
     const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
-    const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode);
-    for(const node of nodes){const value=node.nodeValue.trim();if(dict[value]) node.nodeValue=node.nodeValue.replace(value,dict[value]);}
-    root.querySelectorAll?.("input[placeholder],textarea[placeholder]").forEach(el=>{const v=el.getAttribute("placeholder");if(dict[v])el.setAttribute("placeholder",dict[v]);});
+    const nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);
+    for(const node of nodes){if(node.__appnestOriginal===undefined)node.__appnestOriginal=node.nodeValue;const original=node.__appnestOriginal,trimmed=original.trim();if(!trimmed)continue;const translated=state.language==="ru"?original:(dict[trimmed]?original.replace(trimmed,dict[trimmed]):original);if(node.nodeValue!==translated)node.nodeValue=translated;}
+    root.querySelectorAll?.("input[placeholder],textarea[placeholder]").forEach(el=>{if(!el.dataset.originalPlaceholder)el.dataset.originalPlaceholder=el.getAttribute("placeholder")||"";const original=el.dataset.originalPlaceholder;el.setAttribute("placeholder",state.language==="ru"?original:(dict[original]||original));});
   }
   function setLanguage(language) {
     if(!["ru","tj","en"].includes(language)) return;

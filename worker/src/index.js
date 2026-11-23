@@ -377,6 +377,25 @@ async function handle(request, env) {
     if (path.startsWith("/admin/ads/") && method === "DELETE") {
       const id=Number(path.split("/")[3]); await env.DB.prepare("DELETE FROM ad_campaigns WHERE id=?").bind(id).run(); await audit(env,userId,"ad.delete",String(id)); return json({success:true});
     }
+    if (path === "/admin/notifications" && method === "GET") {
+      const {results=[]}=await env.DB.prepare("SELECT id,title,message,active,created_at FROM notifications ORDER BY created_at DESC LIMIT 100").all();
+      return json({success:true,notifications:results});
+    }
+    if (path.startsWith("/admin/notifications/") && method === "PATCH") {
+      const id=Number(path.split("/")[3]),b=await readJson(request);
+      if(typeof b.active!=="boolean") return fail("active должен быть boolean");
+      await env.DB.prepare("UPDATE notifications SET active=? WHERE id=?").bind(b.active?1:0,id).run(); await audit(env,userId,"notification.toggle",String(id)); return json({success:true});
+    }
+    if (path.startsWith("/admin/categories/") && method === "PATCH") {
+      const id=Number(path.split("/")[3]),b=await readJson(request),title=clean(b.title,100),icon=clean(b.icon,20),order=Number(b.sort_order);
+      if(!Number.isSafeInteger(id)||id<1||!title) return fail("Некорректная категория");
+      await env.DB.prepare("UPDATE categories SET title=?,icon=?,sort_order=? WHERE id=?").bind(title,icon,Number.isFinite(order)?order:0,id).run(); await audit(env,userId,"category.update",String(id)); return json({success:true});
+    }
+    if (path.startsWith("/admin/categories/") && method === "DELETE") {
+      const id=Number(path.split("/")[3]),used=await env.DB.prepare("SELECT COUNT(*) n FROM apps WHERE category=(SELECT slug FROM categories WHERE id=?)").bind(id).first();
+      if(used?.n) return fail("Категория используется приложениями",409);
+      await env.DB.prepare("DELETE FROM categories WHERE id=?").bind(id).run(); await audit(env,userId,"category.delete",String(id)); return json({success:true});
+    }
     if (path.startsWith("/admin/feedback/") && method === "PATCH") {
       const id=Number(path.split("/")[3]),b=await readJson(request);
       if(!["open","resolved","rejected"].includes(b.status)) return fail("Недопустимый статус");
@@ -388,16 +407,18 @@ async function handle(request, env) {
       return json({success:true,users:results});
     }
     if (path === "/admin/overview" && method === "GET") {
-      const [apps,users,downloads,feedback,allApps,ads,channels] = await Promise.all([
+      const [apps,users,downloads,feedback,allApps,ads,channels,frequency,mode] = await Promise.all([
         env.DB.prepare("SELECT COUNT(*) n FROM apps WHERE status='published'").first(),
         env.DB.prepare("SELECT COUNT(*) n FROM users").first(),
         env.DB.prepare("SELECT COUNT(*) n FROM downloads").first(),
         env.DB.prepare("SELECT id,user_id,message,created_at FROM feedback WHERE status='open' ORDER BY created_at DESC LIMIT 50").all(),
         env.DB.prepare("SELECT id,title,description,category,version,downloads,status FROM apps ORDER BY created_at DESC LIMIT 100").all(),
         env.DB.prepare("SELECT id,title,kind,active,starts_at,ends_at,impressions,clicks FROM ad_campaigns ORDER BY id DESC LIMIT 50").all(),
-        env.DB.prepare("SELECT id,chat_id,title,invite_url,enabled FROM required_channels ORDER BY id").all()
+        env.DB.prepare("SELECT id,chat_id,title,invite_url,enabled FROM required_channels ORDER BY id").all(),
+        env.DB.prepare("SELECT substr(created_at,1,10) day,COUNT(*) count FROM downloads GROUP BY substr(created_at,1,10) ORDER BY day DESC LIMIT 14").all(),
+        env.DB.prepare("SELECT value FROM settings WHERE key='subscription_mode'").first()
       ]);
-      return json({success:true,apps_count:apps.n,users_count:users.n,downloads_count:downloads.n,feedback:feedback.results,apps:allApps.results,ads:ads.results,channels:channels.results});
+      return json({success:true,apps_count:apps.n,users_count:users.n,downloads_count:downloads.n,feedback:feedback.results,apps:allApps.results,ads:ads.results,channels:channels.results,downloads_by_day:frequency.results,subscription_mode:mode?.value||"all"});
     }
     if (path === "/admin/apps" && method === "POST") {
       const form=await request.formData(); const title=clean(form.get("title"),100), description=clean(form.get("description"),5000), developer=clean(form.get("developer"),120), category=clean(form.get("category"),80), version=clean(form.get("version"),40), minAndroid=clean(form.get("min_android"),40);

@@ -30,6 +30,57 @@
 
   const initData = tg?.initData || "";
 
+
+  function hexDigest(buffer) { return [...new Uint8Array(buffer)].map(x=>x.toString(16).padStart(2,"0")).join(""); }
+  function setUploadProgress(done,total,label="Загрузка") {
+    const bar=$("#uploadProgress"),status=$("#uploadStatus");
+    if(bar) bar.value=total?Math.min(100,Math.round(done/total*100)):0;
+    if(status) status.textContent=label+" · "+(total?Math.round(done/total*100):0)+"%";
+  }
+  function sendUploadPart(uploadId,partNumber,bytes,onProgress) {
+    return new Promise((resolve,reject)=>{
+      const xhr=new XMLHttpRequest();
+      xhr.open("PUT",API+`/admin/uploads/${encodeURIComponent(uploadId)}/parts?part_number=${partNumber}`);
+      xhr.setRequestHeader("X-Telegram-Init-Data",initData);
+      xhr.setRequestHeader("Content-Type","application/octet-stream");
+      xhr.upload.onprogress=e=>{if(e.lengthComputable) onProgress(e.loaded,e.total);};
+      xhr.onload=()=>{let data={};try{data=JSON.parse(xhr.responseText);}catch{} if(xhr.status>=200&&xhr.status<300)resolve(data);else reject(new Error(data.error||"Ошибка части "+partNumber));};
+      xhr.onerror=()=>reject(new Error("Сетевая ошибка при загрузке части "+partNumber));
+      xhr.onabort=()=>reject(new Error("Загрузка отменена"));
+      xhr.send(bytes);
+    });
+  }
+  async function uploadFileMultipart(file,kind,extra={},onProgress=()=>{}) {
+    const digest=hexDigest(await crypto.subtle.digest("SHA-256",await file.arrayBuffer()));
+    const init=await request("/admin/uploads",{method:"POST",body:JSON.stringify({
+      kind,filename:file.name,size_bytes:file.size,content_type:file.type||"application/octet-stream",
+      sha256:digest,...extra
+    })});
+    const chunkSize=init.part_size||8388608, count=Math.ceil(file.size/chunkSize);
+    let sent=0;
+    try {
+      for(let part=1;part<=count;part++){
+        const chunk=file.slice((part-1)*chunkSize,Math.min(part*chunkSize,file.size));
+        let done=false,lastProgress=0,error;
+        for(let attempt=0;attempt<3&&!done;attempt++){
+          try {
+            await sendUploadPart(init.upload_id,part,chunk,(loaded)=>{
+              const current=sent+Math.min(loaded,chunk.size);
+              onProgress(current,file.size);
+            });
+            done=true;sent+=chunk.size;onProgress(sent,file.size);
+          } catch(e){error=e;if(attempt<2) await new Promise(r=>setTimeout(r,500*(attempt+1)));}
+        }
+        if(!done) throw error||new Error("Не удалось загрузить часть "+part);
+      }
+      const completed=await request("/admin/uploads/"+encodeURIComponent(init.upload_id)+"/complete",{method:"POST",body:JSON.stringify({})});
+      return {...completed,sha256:digest};
+    } catch(error) {
+      await request("/admin/uploads/"+encodeURIComponent(init.upload_id),{method:"DELETE"}).catch(()=>{});
+      throw error;
+    }
+  }
+
   async function request(path, options = {}) {
     const response = await fetch(API + path, {
       ...options,
@@ -371,6 +422,7 @@
   async function loadProfileData() {
     try {
       const data = await request("/me");
+      state.language = data.language || state.language || "ru";
       state.user = data.user || null;
       state.isAdmin = data.is_admin === true;
       state.favorites = new Set((data.favorites || []).map(String));
@@ -468,41 +520,40 @@
       <form id="addAppForm">
         <label>Название<input name="title" required maxlength="100"></label>
         <label>Описание<textarea name="description" required maxlength="5000"></textarea></label>
-        <label>Категория
-          <select name="category">
-            <option value="productivity">Продуктивность</option>
-            <option value="games">Игры</option>
-            <option value="tools">Инструменты</option>
-            <option value="other">Другое</option>
-          </select>
-        </label>
-        <label>Версия<input name="version" placeholder="1.0.0"></label>
+        <label>Разработчик<input name="developer" maxlength="120"></label>
+        <label>Категория<select name="category"><option value="productivity">Продуктивность</option><option value="games">Игры</option><option value="tools">Инструменты</option><option value="other">Другое</option></select></label>
+        <label>Версия<input name="version" placeholder="1.0.0" required></label>
+        <label>Version code<input name="version_code" type="number" min="1" required></label>
+        <label>Минимальный Android<input name="min_android" placeholder="8.0"></label>
+        <label>Описание обновления<textarea name="release_notes" maxlength="2000"></textarea></label>
         <label>APK-файл<input name="apk" type="file" accept=".apk,application/vnd.android.package-archive" required></label>
         <label>Иконка<input name="icon" type="file" accept="image/png,image/jpeg,image/webp"></label>
-        <button class="primary-button full-button" type="submit">Опубликовать</button>
+        <label>Баннер<input name="banner" type="file" accept="image/png,image/jpeg,image/webp"></label>
+        <label>Скриншоты<input name="screenshots" type="file" accept="image/png,image/jpeg,image/webp" multiple></label>
+        <progress id="uploadProgress" max="100" value="0" style="width:100%"></progress><p id="uploadStatus" hidden>Подготовка загрузки</p>
+        <button class="primary-button full-button" type="submit">Загрузить и опубликовать</button>
       </form>
     `);
   }
 
   async function submitApp(form) {
-    const formData = new FormData(form);
-
+    const data=new FormData(form),apk=data.get("apk"),icon=data.get("icon"),banner=data.get("banner"),screens=[...(data.getAll("screenshots")||[])].filter(x=>x instanceof File&&x.size);
+    const button=form.querySelector('button[type="submit"]'); if(button)button.disabled=true;
+    const status=$("#uploadStatus"); if(status)status.hidden=false;
     try {
-      const response = await fetch(API + "/admin/apps", {
-        method: "POST",
-        headers: { "X-Telegram-Init-Data": initData },
-        body: formData
-      });
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || "Ошибка публикации");
-
-      closeModal();
-      toast("Приложение добавлено");
-      await loadApps();
-      await loadAdmin();
-    } catch (error) {
-      toast(error.message);
+      if(!(apk instanceof File)||!apk.size) throw new Error("Выберите APK-файл");
+      const result=await uploadFileMultipart(apk,"apk",{version:data.get("version"),version_code:Number(data.get("version_code")),min_android:data.get("min_android"),release_notes:data.get("release_notes"),metadata:{title:data.get("title"),description:data.get("description"),developer:data.get("developer"),category:data.get("category")}},setUploadProgress);
+      const appId=result.app_id;
+      for(const [file,kind] of [[icon,"icon"],[banner,"banner"],...screens.map(file=>[file,"screenshot"])]) {
+        if(file instanceof File&&file.size) await uploadFileMultipart(file,kind,{app_id:appId},()=>{});
+      }
+      await request("/admin/apps/"+appId,{method:"PATCH",body:JSON.stringify({status:"published"})});
+      closeModal();toast("Приложение загружено и опубликовано");
+      await loadApps();await loadAdmin();
+    } catch(error) {
+      if(status)status.textContent="Ошибка: "+error.message+" · Проверьте сеть и нажмите «Повторить»";
+      if(button){button.disabled=false;button.textContent="Повторить загрузку";}
+      toast(error.message||"Ошибка загрузки");
     }
   }
 
@@ -535,12 +586,61 @@
     }
   }
 
+  const translations = {
+    tj: {
+      "Главная":"Асосӣ","Каталог":"Феҳрист","Избранное":"Маҳбубҳо","Профиль":"Профил",
+      "Открой что-то":"Чизи навро","новое.":"кашф кун.","Лучшие приложения в одном месте.":"Барномаҳои беҳтарин дар як ҷо.",
+      "Найти приложение...":"Барномаро ҷустуҷӯ кунед...","Найти":"Ҷустуҷӯ","Категории":"Категорияҳо",
+      "Все":"Ҳама","Популярное":"Машҳур","Недавно добавлены":"Ба наздикӣ илова шуд",
+      "Продуктивность":"Самаранокӣ","Игры":"Бозиҳо","Инструменты":"Асбобҳо","Другое":"Дигар",
+      "Исследуй приложения и находи полезные инструменты.":"Барномаҳоро омӯзед ва воситаҳои муфидро пайдо кунед.",
+      "Название или описание...":"Ном ё тавсиф...","Все категории":"Ҳамаи категорияҳо",
+      "Сначала новые":"Аввал навҳо","Популярные":"Машҳур","По названию":"Аз рӯи ном",
+      "Ничего не найдено":"Ҳеҷ чиз ёфт нашуд","Пока здесь пусто":"Ҳоло холӣ аст",
+      "Открыть каталог":"Кушодани феҳрист","Язык приложения":"Забони барнома",
+      "Выбери удобный язык":"Забони мувофиқро интихоб кунед","История скачиваний":"Таърихи боргириҳо",
+      "Обратная связь":"Алоқа","Связаться с нами":"Бо мо тамос гиред",
+      "Открыть панель управления":"Кушодани панели идоракунӣ","Уведомления":"Огоҳиномаҳо",
+      "Загрузки":"Боргириҳо","Назад":"Бозгашт","Пока нет уведомлений":"Ҳоло огоҳинома нест",
+      "Администрирование":"Идоракунӣ","Добавить приложение":"Иловаи барнома","Отзывы":"Шарҳҳо",
+      "Статистика":"Омор","Приложения":"Барномаҳо","Пользователи":"Истифодабарандагон",
+      "Скачивания":"Боргириҳо","Настройки":"Танзимот","Избранное.":"Маҳбубҳо."
+    },
+    en: {
+      "Главная":"Home","Каталог":"Catalog","Избранное":"Favorites","Профиль":"Profile",
+      "Открой что-то":"Discover something","новое.":"new.","Лучшие приложения в одном месте.":"The best apps in one place.",
+      "Найти приложение...":"Search apps...","Найти":"Search","Категории":"Categories",
+      "Все":"All","Популярное":"Popular","Недавно добавлены":"Recently added",
+      "Продуктивность":"Productivity","Игры":"Games","Инструменты":"Tools","Другое":"Other",
+      "Исследуй приложения и находи полезные инструменты.":"Explore apps and find useful tools.",
+      "Название или описание...":"Name or description...","Все категории":"All categories",
+      "Сначала новые":"Newest first","Популярные":"Popular","По названию":"By name",
+      "Ничего не найдено":"Nothing found","Пока здесь пусто":"Nothing here yet",
+      "Открыть каталог":"Open catalog","Язык приложения":"App language",
+      "Выбери удобный язык":"Choose your preferred language","История скачиваний":"Download history",
+      "Обратная связь":"Feedback","Связаться с нами":"Contact us",
+      "Открыть панель управления":"Open admin panel","Уведомления":"Notifications",
+      "Загрузки":"Downloads","Назад":"Back","Пока нет уведомлений":"No notifications yet",
+      "Администрирование":"Administration","Добавить приложение":"Add app","Отзывы":"Feedback",
+      "Статистика":"Analytics","Приложения":"Apps","Пользователи":"Users",
+      "Скачивания":"Downloads","Настройки":"Settings","Избранное.":"Favorites."
+    }
+  };
+  function applyTranslations(root=document) {
+    const dict=translations[state.language]; if(!dict) return;
+    const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
+    const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode);
+    for(const node of nodes){const value=node.nodeValue.trim();if(dict[value]) node.nodeValue=node.nodeValue.replace(value,dict[value]);}
+    root.querySelectorAll?.("input[placeholder],textarea[placeholder]").forEach(el=>{const v=el.getAttribute("placeholder");if(dict[v])el.setAttribute("placeholder",dict[v]);});
+  }
   function setLanguage(language) {
+    if(!["ru","tj","en"].includes(language)) return;
     state.language = language;
-    try {
-      localStorage.setItem("appnest-language", language);
-    } catch {}
-    toast("Язык: " + language.toUpperCase());
+    try { localStorage.setItem("appnest-language", language); } catch {}
+    request("/me",{method:"PATCH",body:JSON.stringify({language})}).catch(error=>toast(error.message));
+    document.documentElement.lang=language==="tj"?"tg":language;
+    applyTranslations();
+    toast(language==="ru"?"Язык изменён":language==="tj"?"Забон иваз шуд":"Language updated");
   }
 
   document.addEventListener("click", event => {
@@ -673,6 +773,9 @@
     if ($("#languageSelect")) $("#languageSelect").value = state.language;
   } catch {}
 
+  const translationObserver = new MutationObserver(records=>{for(const record of records){if(record.addedNodes.length) applyTranslations(record.target.nodeType===1?record.target:record.target.parentElement||document);}});
+  translationObserver.observe(document.body,{childList:true,subtree:true});
+
   async function start() {
     if (!initData) {
       toast("Откройте APPNEST через Telegram");
@@ -683,6 +786,7 @@
     ]);
 
     renderProfile();
+    applyTranslations();
   }
 
   start();

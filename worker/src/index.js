@@ -504,7 +504,7 @@ async function handle(request, env) {
     }
     if (path === "/admin/ads" && method === "POST") {
       const b=await readJson(request); const title=clean(b.title,120),kind=clean(b.kind,40),creative=clean(b.creative_url,1000),target=clean(b.target_url,1000),starts=clean(b.starts_at,40),ends=clean(b.ends_at,40);
-      if(!title||!["banner","channel","task"].includes(kind)||!validHttpUrl(target)||(creative&&!validHttpUrl(creative))||!starts||!ends||new Date(starts)>=new Date(ends)) return fail("Некорректные параметры кампании");
+      if(!title||!["banner","channel","task"].includes(kind)||!validHttpUrl(target)||(creative&&!validHttpUrl(creative))||!starts||!ends||!Number.isFinite(Date.parse(starts))||!Number.isFinite(Date.parse(ends))||new Date(starts)>=new Date(ends)) return fail("Некорректные параметры кампании");
       await env.DB.prepare("INSERT INTO ad_campaigns(title,kind,creative_url,target_url,starts_at,ends_at,active,priority) VALUES(?,?,?,?,?,?,?,?)").bind(title,kind,creative,target,starts,ends,b.active===false?0:1,Number(b.priority)||0).run(); await audit(env,userId,"ad.create",title); return json({success:true},201);
     }
     if (path.startsWith("/admin/users/") && method === "PATCH") {

@@ -105,7 +105,7 @@
     const title = escapeHTML(app.title || "Без названия");
     const description = escapeHTML(app.description || "");
     const icon = app.icon_url
-      ? `<img src="${escapeHTML(app.icon_url)}" alt="" loading="lazy">`
+      ? `<img src="${escapeHTML(new URL(app.icon_url, API).href)}" alt="" loading="lazy">`
       : `<span>${escapeHTML((app.title || "A").charAt(0).toUpperCase())}</span>`;
 
     const favorite = state.favorites.has(String(id));
@@ -234,7 +234,7 @@
     state.selectedApp = app;
 
     const icon = app.icon_url
-      ? `<img src="${escapeHTML(app.icon_url)}" alt="">`
+      ? `<img src="${escapeHTML(new URL(app.icon_url, API).href)}" alt="">`
       : `<span>${escapeHTML((app.title || "A")[0])}</span>`;
 
     $("#appDetailsContent").innerHTML = `
@@ -272,22 +272,37 @@
 
   async function downloadApp(id) {
     try {
-      const result = await request(`/apps/${encodeURIComponent(id)}/download`, {
+      const response = await fetch(API + `/apps/${encodeURIComponent(id)}/download`, {
         method: "POST",
-        body: JSON.stringify({})
+        headers: { "X-Telegram-Init-Data": initData }
       });
-
-      if (!result.url) throw new Error("Ссылка на скачивание не получена");
-
-      state.history.unshift({
-        id,
-        title: state.apps.find(a =>
-          String(a.id ?? a.code) === String(id)
-        )?.title || "Приложение",
-        date: new Date().toISOString()
-      });
-
-      window.location.href = result.url;
+      const type = response.headers.get("content-type") || "";
+      if (!response.ok) {
+        const error = type.includes("application/json")
+          ? await response.json().catch(() => ({}))
+          : {};
+        if (error.subscription_required) {
+          const channels = (error.channels || []).map(channel =>
+            `<p>${escapeHTML(channel.title)} — ${channel.subscribed ? "✓ подписка есть" : "подпишитесь"}</p>
+             <a class="secondary-button full-button" href="${escapeHTML(channel.invite_url)}" target="_blank" rel="noopener">Открыть канал</a>`
+          ).join("");
+          openModal(`<h2>Подписка на каналы</h2><p>Для скачивания выполните условия подписки, затем повторите проверку.</p>${channels}<button class="primary-button full-button" id="retryDownload" data-retry-download="${escapeHTML(id)}">Проверить снова</button>`);
+          throw new Error(error.error || "Требуется подписка");
+        }
+        throw new Error(error.error || "Не удалось скачать приложение");
+      }
+      if (!type.includes("application/vnd.android.package-archive")) {
+        throw new Error("Сервер вернул файл неизвестного типа");
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = (state.selectedApp?.title || "app").replace(/[^a-z0-9_-]/gi, "_") + ".apk";
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
       await loadProfileData();
     } catch (error) {
       toast(error.message || "Не удалось скачать приложение");
@@ -547,6 +562,9 @@
       toggleFavorite(favoriteButton.dataset.favorite);
       return;
     }
+
+    const retryButton = event.target.closest("[data-retry-download]");
+    if (retryButton) { const retryId = retryButton.dataset.retryDownload; closeModal(); downloadApp(retryId); return; }
 
     const downloadButton = event.target.closest("[data-download]");
     if (downloadButton) {

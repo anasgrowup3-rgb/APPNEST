@@ -250,9 +250,10 @@ async function handle(request, env) {
     return json({success:true},201);
   }
   if (path === "/ads" && method === "GET") {
-    const {results=[]}=await env.DB.prepare("SELECT id,title,kind,creative_url,target_url FROM ad_campaigns WHERE active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now') ORDER BY priority DESC LIMIT 5").all();
+    const {results=[]}=await env.DB.prepare("SELECT id,title,kind,creative_url,target_url FROM ad_campaigns WHERE active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now') ORDER BY priority DESC LIMIT 10").all();
+    const safeAds=results.filter(ad=>validHttpUrl(ad.target_url)&&(!ad.creative_url||validHttpUrl(ad.creative_url))).slice(0,5);
     const today=new Date().toISOString().slice(0,10),shown=[];
-    for(const ad of results){const cap=await env.DB.prepare("SELECT impressions FROM ad_frequency WHERE user_id=? AND ad_id=? AND day=?").bind(userId,ad.id,today).first();if((cap?.impressions||0)<3)shown.push(ad);}
+    for(const ad of safeAds){const cap=await env.DB.prepare("SELECT impressions FROM ad_frequency WHERE user_id=? AND ad_id=? AND day=?").bind(userId,ad.id,today).first();if((cap?.impressions||0)<3)shown.push(ad);}
     return json({success:true,ads:shown});
   }
   if (path.startsWith("/ads/") && method === "POST" && /\/(impression|click)$/.test(path)) {

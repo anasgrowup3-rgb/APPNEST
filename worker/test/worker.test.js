@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import worker from "../src/index.js";
+import worker, { sha256Readable } from "../src/index.js";
 
 const TOKEN = "123456:TEST_TOKEN_FOR_UNIT_TESTS_ONLY";
 class MockDB {
@@ -24,7 +24,7 @@ class MockDB {
     };
   }
 }
-const env = () => ({ DB: new MockDB(), BOT_TOKEN: TOKEN, ADMIN_IDS: "42", ALLOWED_ORIGIN: "https://mini.example" });
+const env = () => ({ DB: new MockDB(), FILES: { get: async () => null }, BOT_TOKEN: TOKEN, ADMIN_IDS: "42", ALLOWED_ORIGIN: "https://mini.example" });
 function signedInitData(userId = 42, ageSeconds = 0) {
   const authDate = Math.floor(Date.now() / 1000) - ageSeconds;
   const params = new URLSearchParams({
@@ -81,4 +81,15 @@ test("preflight advertises Telegram auth header", async () => {
   const response = await call("/health", { method: "OPTIONS", headers: { Origin: "https://mini.example" } });
   assert.equal(response.status, 204);
   assert.match(response.headers.get("access-control-allow-headers"), /X-Telegram-Init-Data/);
+});
+
+test("streaming SHA-256 matches known digest across arbitrary chunks", async () => {
+  const chunks = [new TextEncoder().encode("a"), new TextEncoder().encode("b"), new TextEncoder().encode("c")];
+  const stream = new ReadableStream({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); } });
+  assert.equal(await sha256Readable(stream), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+});
+test("streaming SHA-256 handles multi-block payloads", async () => {
+  const bytes = new TextEncoder().encode("APPNEST ".repeat(1000));
+  const stream = new ReadableStream({ start(controller) { for(let i=0;i<bytes.length;i+=73) controller.enqueue(bytes.slice(i,i+73)); controller.close(); } });
+  assert.equal(await sha256Readable(stream), createHmac("sha256", "").update(bytes).digest("hex") === "unused" ? "" : (await import("node:crypto")).createHash("sha256").update(bytes).digest("hex"));
 });

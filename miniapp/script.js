@@ -492,7 +492,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
         <article class="app-card admin-app-row"><div class="app-card-info"><h3>${escapeHTML(app.title)}</h3><p>${escapeHTML(app.category)} · v${escapeHTML(app.version)} · ${escapeHTML(app.status)}</p><small>${Number(app.downloads)||0} downloads</small></div>
         <div class="admin-actions"><button data-app-status="${app.id}" data-status="${app.status==="published"?"archived":"published"}">${app.status==="published"?"Архив":"Опубликовать"}</button><button data-app-edit="${app.id}" data-title="${escapeHTML(app.title)}" data-description="${escapeHTML(app.description||"")}" data-category="${escapeHTML(app.category||"other")}">Изменить</button><button data-app-versions="${app.id}">Версии</button><button data-app-update="${app.id}">Обновить APK</button></div></article>`).join("")||"Приложений пока нет";
       $("#adminFeedbackList").innerHTML=(feedback.feedback||[]).map(item=>`<article class="admin-feedback"><p>${escapeHTML(item.message)}</p><small>${escapeHTML(item.created_at||"")} · ${escapeHTML(item.user_id||"")}</small><button data-feedback-resolve="${item.id}">Закрыть</button></article>`).join("")||"Отзывов пока нет";
-      $("#adminAnalytics").innerHTML=`<p>Пользователи: <strong>${data.users_count||0}</strong></p><p>Опубликованные приложения: <strong>${data.apps_count||0}</strong></p><p>Скачивания: <strong>${data.downloads_count||0}</strong></p><h3>Кампании</h3>${(data.ads||[]).map(ad=>`<p>${escapeHTML(ad.title)} · ${ad.impressions} показов · ${ad.clicks} кликов <button data-ad-toggle="${ad.id}" data-active="${ad.active?0:1}">${ad.active?"Выключить":"Включить"}</button><button data-ad-delete="${ad.id}">Удалить</button></p>`).join("")||"Нет кампаний"}`;
+      $("#adminAnalytics").innerHTML=`<p>Пользователи: <strong>${data.users_count||0}</strong></p><p>Опубликованные приложения: <strong>${data.apps_count||0}</strong></p><p>Скачивания: <strong>${data.downloads_count||0}</strong></p><h3>Кампании</h3>${(data.ads||[]).map(ad=>`<p>${escapeHTML(ad.title)} · ${ad.impressions} показов · ${ad.clicks} кликов <button data-ad-toggle="${ad.id}" data-active="${ad.active?0:1}">${ad.active?"Выключить":"Включить"}</button><button data-ad-edit="${ad.id}" data-title="${escapeHTML(ad.title)}" data-kind="${escapeHTML(ad.kind)}" data-target="${escapeHTML(ad.target_url)}" data-creative="${escapeHTML(ad.creative_url||"")}" data-starts="${escapeHTML(ad.starts_at)}" data-ends="${escapeHTML(ad.ends_at)}" data-priority="${Number(ad.priority)||0}">Изменить</button><button data-ad-delete="${ad.id}">Удалить</button></p>`).join("")||"Нет кампаний"}`;
       let extra=$("#adminExtras");if(!extra){extra=document.createElement("section");extra.id="adminExtras";extra.className="admin-panel active";$("#page-admin").append(extra);}
       extra.innerHTML=`
         <div class="admin-tabs admin-extra-tabs">
@@ -726,6 +726,20 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
     if(categoryDelete){if(confirm("Удалить категорию?"))request("/admin/categories/"+categoryDelete.dataset.categoryDelete,{method:"DELETE"}).then(loadAdmin).catch(e=>toast(e.message));return;}
     const channelDelete=event.target.closest("[data-channel-delete]");
     if(channelDelete){if(confirm("Удалить канал из обязательных?"))request("/admin/channels/"+channelDelete.dataset.channelDelete,{method:"DELETE"}).then(loadAdmin).catch(e=>toast(e.message));return;}
+    const adEdit=event.target.closest("[data-ad-edit]");
+    if(adEdit){
+      const localValue=value=>(value||"").replace(" ","T").slice(0,16);
+      openModal(`<h2>Редактировать кампанию</h2><form id="editAdForm" data-ad-id="${adEdit.dataset.adEdit}">
+        <label>Название<input name="title" value="${adEdit.dataset.title}" required></label>
+        <label>Тип<select name="kind"><option value="banner">Баннер</option><option value="channel">Telegram-канал</option><option value="task">Задание</option></select></label>
+        <label>Изображение URL<input name="creative_url" value="${adEdit.dataset.creative}"></label>
+        <label>Целевая HTTPS-ссылка<input name="target_url" value="${adEdit.dataset.target}" required></label>
+        <label>Начало<input name="starts_at" type="datetime-local" value="${localValue(adEdit.dataset.starts)}" required></label>
+        <label>Окончание<input name="ends_at" type="datetime-local" value="${localValue(adEdit.dataset.ends)}" required></label>
+        <label>Приоритет<input name="priority" type="number" value="${adEdit.dataset.priority}"></label>
+        <button class="primary-button full-button">Сохранить кампанию</button></form>`);
+      const kind=$("#editAdForm select[name=kind]");if(kind)kind.value=adEdit.dataset.kind;return;
+    }
     const adDelete=event.target.closest("[data-ad-delete]");
     if(adDelete){if(confirm("Удалить рекламную кампанию?"))request("/admin/ads/"+adDelete.dataset.adDelete,{method:"DELETE"}).then(loadAdmin).catch(e=>toast(e.message));return;}
     const notificationToggle=event.target.closest("[data-notification-toggle]");
@@ -829,6 +843,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
     if(form.id==="updateApkForm"){event.preventDefault();const d=new FormData(form),file=d.get("apk"),button=form.querySelector("button");button.disabled=true;const status=$("#uploadStatus");status.hidden=false;uploadFileMultipart(file,"apk",{app_id:Number(form.dataset.appId),version:d.get("version"),version_code:Number(d.get("version_code")),min_android:d.get("min_android"),release_notes:d.get("release_notes")},setUploadProgress).then(()=>{closeModal();toast("Обновление загружено");loadAdmin();loadApps();}).catch(e=>{status.textContent="Ошибка: "+e.message+" · Нажмите повторить";button.disabled=false;button.textContent="Повторить загрузку";toast(e.message);});}
     if(form.id==="categoryForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/categories",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
     if(form.id==="channelForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/channels",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
+    if(form.id==="editAdForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));d.starts_at=new Date(d.starts_at).toISOString().replace("T"," ").slice(0,19);d.ends_at=new Date(d.ends_at).toISOString().replace("T"," ").slice(0,19);d.priority=Number(d.priority)||0;request("/admin/ads/"+form.dataset.adId,{method:"PATCH",body:JSON.stringify(d)}).then(()=>{closeModal();loadAdmin();}).catch(e=>toast(e.message));}
     if(form.id==="adForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));d.starts_at=new Date(d.starts_at).toISOString().replace("T"," ").slice(0,19);d.ends_at=new Date(d.ends_at).toISOString().replace("T"," ").slice(0,19);request("/admin/ads",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
     if(form.id==="notificationForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/notifications",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
     if (event.target.id === "feedbackForm") {

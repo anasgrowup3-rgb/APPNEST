@@ -388,16 +388,6 @@ async function handle(request, env) {
       if(typeof b.active!=="boolean") return fail("active должен быть boolean");
       await env.DB.prepare("UPDATE notifications SET active=? WHERE id=?").bind(b.active?1:0,id).run(); await audit(env,userId,"notification.toggle",String(id)); return json({success:true});
     }
-    if (path.startsWith("/admin/categories/") && method === "PATCH") {
-      const id=Number(path.split("/")[3]),b=await readJson(request),title=clean(b.title,100),icon=clean(b.icon,20),order=Number(b.sort_order);
-      if(!Number.isSafeInteger(id)||id<1||!title) return fail("Некорректная категория");
-      await env.DB.prepare("UPDATE categories SET title=?,icon=?,sort_order=? WHERE id=?").bind(title,icon,Number.isFinite(order)?order:0,id).run(); await audit(env,userId,"category.update",String(id)); return json({success:true});
-    }
-    if (path.startsWith("/admin/categories/") && method === "DELETE") {
-      const id=Number(path.split("/")[3]),used=await env.DB.prepare("SELECT COUNT(*) n FROM apps WHERE category=(SELECT slug FROM categories WHERE id=?)").bind(id).first();
-      if(used?.n) return fail("Категория используется приложениями",409);
-      await env.DB.prepare("DELETE FROM categories WHERE id=?").bind(id).run(); await audit(env,userId,"category.delete",String(id)); return json({success:true});
-    }
     if (path.startsWith("/admin/feedback/") && method === "PATCH") {
       const id=Number(path.split("/")[3]),b=await readJson(request);
       if(!["open","resolved","rejected"].includes(b.status)) return fail("Недопустимый статус");

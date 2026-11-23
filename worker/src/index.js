@@ -344,8 +344,19 @@ async function handle(request, env) {
     }
     if (path.startsWith("/admin/uploads/") && path.endsWith("/complete") && method === "POST") {
       if(!env.FILES) return fail("R2 binding FILES не настроен",503);
-      const id=path.split("/")[3],session=await uploadOwner(env,id,userId);
-      if(!session) return fail("Загрузка не найдена или истекла",404);
+      const id=path.split("/")[3];
+      const session=await uploadOwner(env,id,userId);
+      if(!session){
+        const completed=await env.DB.prepare("SELECT app_id,object_key,metadata_json FROM upload_sessions WHERE id=? AND owner_id=? AND status='completed'").bind(id,userId).first();
+        if(completed){
+          const meta=safeJson(completed.metadata_json);
+          const app=meta.kind==="apk"&&completed.app_id
+            ? await env.DB.prepare("SELECT apk_sha256 FROM apps WHERE id=?").bind(completed.app_id).first()
+            : null;
+          return json({success:true,app_id:completed.app_id,object_key:completed.object_key,sha256:app?.apk_sha256||null});
+        }
+        return fail("Загрузка не найдена или истекла",404);
+      }
       const meta=safeJson(session.metadata_json);
       if(meta.kind==="apk"&&!session.app_id){
         const data=meta.metadata||{};
@@ -579,9 +590,10 @@ export default {
   },
   async fetch(request, env) {
     const origin = request.headers.get("Origin");
-    const allowed = clean(env.ALLOWED_ORIGIN, 500);
+    const allowedOrigins = (env.ALLOWED_ORIGINS || env.ALLOWED_ORIGIN || "")
+      .split(",").map(value => value.trim()).filter(Boolean);
     const cors = { "vary": "Origin" };
-    if (allowed && origin === allowed) cors["access-control-allow-origin"] = origin;
+    if (origin && allowedOrigins.includes(origin)) cors["access-control-allow-origin"] = origin;
     try {
       const response = await handle(request,env);
       const headers = new Headers(response.headers);

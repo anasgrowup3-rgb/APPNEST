@@ -55,7 +55,8 @@ async function auth(request, env) {
   const raw = request.headers.get("X-Telegram-Init-Data") || "";
   const user = await verifyTelegram(raw, env.BOT_TOKEN, Number(env.TELEGRAM_AUTH_MAX_AGE || 86400));
   if (!user) return { error: fail("Требуется действительная авторизация Telegram", 401) };
-  if (await rateLimit(env, "user:" + user.id, 120)) return { error: fail("Слишком много запросов", 429) };
+  const uploadPartRequest=new URL(request.url).pathname.startsWith("/api/admin/uploads/") && new URL(request.url).pathname.endsWith("/parts");
+  if (await rateLimit(env, "user:" + user.id, uploadPartRequest ? 600 : 120)) return { error: fail("Слишком много запросов", 429) };
   const blocked = await env.DB.prepare("SELECT is_blocked FROM users WHERE telegram_id=?").bind(user.id).first();
   if (blocked?.is_blocked) return { error: fail("Доступ к сервису ограничен", 403) };
   await env.DB.prepare("INSERT INTO users (telegram_id, username, first_name, last_name, photo_url, last_seen) VALUES (?, ?, ?, ?, ?, datetime('now')) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, last_name=excluded.last_name, photo_url=excluded.photo_url, last_seen=datetime('now')").bind(user.id,user.username,user.first_name,user.last_name,user.photo_url).run();
@@ -238,7 +239,8 @@ async function handle(request, env) {
   }
   if (path === "/subscription/status" && method === "GET") return json({success:true,...await subscriptionCheck(env,userId)});
   if (path.startsWith("/admin/")) {
-    const admin = await adminAuth(request,env); if(admin.error) return admin.error;
+    if(!session.isAdmin) return fail("Недостаточно прав",403);
+    const admin = session;
 
     if (path === "/admin/categories" && method === "GET") {
       const {results=[]}=await env.DB.prepare("SELECT id,slug,title,icon,sort_order FROM categories ORDER BY sort_order,title").all();

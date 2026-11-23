@@ -149,6 +149,10 @@ ok(await call(`/api/admin/uploads/${upload.data.upload_id}/parts?part_number=2`,
 const complete = await call(`/api/admin/uploads/${upload.data.upload_id}/complete`, { userId: adminId, method: "POST", body: {} });
 ok(complete, 200, "complete R2 multipart APK");
 assert.equal(complete.data.sha256, expectedSha, "server SHA-256 must match client digest");
+const completionRetry = await call(`/api/admin/uploads/${upload.data.upload_id}/complete`, { userId: adminId, method: "POST", body: {} });
+ok(completionRetry, 200, "retry completed upload after a lost response");
+assert.equal(completionRetry.data.app_id, complete.data.app_id, "retry must return the same app");
+assert.equal(completionRetry.data.sha256, expectedSha, "retry must return the original verified checksum");
 const appId = complete.data.app_id;
 assert.ok(appId);
 ok(await call(`/api/admin/apps/${appId}`, { userId: adminId, method: "PATCH", body: { status: "published" } }), 200, "publish isolated integration app");

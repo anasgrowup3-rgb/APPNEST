@@ -1208,3 +1208,22 @@ h1, h2, h3 {
     transition-duration: .01ms !important;
   }
 }
+
+/* APPNEST admin, multipart progress and media gallery */
+#uploadProgress{display:block;height:10px;margin:12px 0;border:0;border-radius:999px;overflow:hidden;accent-color:var(--accent,#8b5cf6)}
+#uploadStatus{font-size:13px;color:var(--muted,#999);margin:6px 0 14px}
+.admin-extra-tabs{display:flex;gap:8px;overflow-x:auto;padding:12px 0;position:sticky;top:0;z-index:2;background:var(--surface,#111)}
+.admin-extra-tabs button,.admin-actions button,.admin-feedback button,[data-channel-toggle],[data-user-block],[data-ad-toggle],[data-feedback-resolve]{border:1px solid var(--border,rgba(255,255,255,.12));border-radius:10px;padding:8px 12px;background:var(--card,#1b1b25);color:inherit;font:inherit;cursor:pointer}
+.admin-extra-tabs button:focus-visible,.admin-actions button:focus-visible{outline:2px solid var(--accent,#8b5cf6);outline-offset:2px}
+#adminExtras section{padding:14px 0;border-bottom:1px solid var(--border,rgba(255,255,255,.1))}
+#adminExtras form{display:grid;gap:10px;margin:12px 0}
+#adminExtras input,#adminExtras select,#adminExtras textarea{width:100%;min-width:0;padding:12px;border:1px solid var(--border,rgba(255,255,255,.14));border-radius:10px;background:var(--card,#1b1b25);color:inherit;font:inherit}
+#adminExtras button[type=submit],#adminExtras form button{padding:11px 14px;border:0;border-radius:10px;background:var(--accent,#7655e8);color:white;font:inherit;font-weight:600}
+.admin-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.admin-app-row{align-items:center}
+.admin-feedback{padding:12px;margin:10px 0;border:1px solid var(--border,rgba(255,255,255,.1));border-radius:12px}
+.details-banner{display:block;width:100%;max-height:220px;object-fit:cover;border-radius:16px;margin:16px 0}
+.screenshots{display:flex;gap:10px;overflow-x:auto;padding:12px 0}
+.screenshots img{width:auto;max-width:75%;height:220px;object-fit:contain;border-radius:12px;background:var(--card,#1b1b25)}
+#adminExtras [hidden]{display:none!important}
+@media(max-width:480px){.admin-actions button{font-size:12px;padding:7px 9px}.screenshots img{height:190px}}

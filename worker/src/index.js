@@ -121,6 +121,7 @@ async function handle(request, env) {
   const method = request.method;
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": env.ALLOWED_ORIGIN || "*", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS", "access-control-allow-headers": "Content-Type,X-Telegram-Init-Data", "access-control-max-age": "86400" } });
   if (path === "/health" && method === "GET") return json({ success: true, service: "APPNEST API", status: "online", storage: !!env.FILES });
+  if (path === "/categories" && method === "GET") { const {results=[]}=await env.DB.prepare("SELECT slug,title,icon FROM categories ORDER BY sort_order,title").all(); return json({success:true,categories:results}); }
   if (path === "/apps" && method === "GET") {
     const category = clean(url.searchParams.get("category"), 80);
     const query = clean(url.searchParams.get("q"), 100);
@@ -147,9 +148,15 @@ async function handle(request, env) {
     const [favs, history, notes] = await Promise.all([
       env.DB.prepare("SELECT app_id FROM favorites WHERE user_id=?").bind(userId).all(),
       env.DB.prepare("SELECT d.app_id,a.title,d.created_at FROM downloads d JOIN apps a ON a.id=d.app_id WHERE d.user_id=? ORDER BY d.created_at DESC LIMIT 100").bind(userId).all(),
-      env.DB.prepare("SELECT id,title,message,created_at FROM notifications WHERE active=1 ORDER BY created_at DESC LIMIT 30").all()
+      env.DB.prepare("SELECT id,title,message,created_at FROM notifications WHERE active=1 ORDER BY created_at DESC LIMIT 30").all(),
+      env.DB.prepare("SELECT language FROM users WHERE telegram_id=?").bind(userId).first()
     ]);
-    return json({ success:true, user:session.user, is_admin:session.isAdmin, favorites:(favs.results||[]).map(x=>String(x.app_id)), history:history.results||[], notifications:notes.results||[] });
+    return json({ success:true, user:session.user, language:notes[1]?.language || "ru", is_admin:session.isAdmin, favorites:(favs.results||[]).map(x=>String(x.app_id)), history:history.results||[], notifications:notes[0].results||[] });
+  }
+  if (path === "/me" && method === "PATCH") {
+    const b=await readJson(request); if(!["ru","tj","en"].includes(b.language)) return fail("Unsupported language");
+    await env.DB.prepare("UPDATE users SET language=? WHERE telegram_id=?").bind(b.language,userId).run();
+    return json({success:true,language:b.language});
   }
   if (path.startsWith("/favorites/")) {
     const appId = Number(path.split("/")[2]);
@@ -266,8 +273,6 @@ async function handle(request, env) {
       const meta=safeJson(session.metadata_json),{results:parts=[]}=await env.DB.prepare("SELECT part_number,etag,size_bytes FROM upload_parts WHERE upload_id=? ORDER BY part_number").bind(id).all();
       const total=parts.reduce((n,p)=>n+p.size_bytes,0);
       if(!parts.length||total!==session.expected_size||parts.some((p,i)=>p.part_number!==i+1)) return fail("Не все части загружены или размер не совпадает",409);
-      const first=await env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id);
-      const head=await first.uploadPart; // no object is committed before R2 validates the multipart manifest
       const upload=env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id);
       const object=await upload.complete(parts.map(p=>({partNumber:p.part_number,etag:p.etag})));
       const stored=await env.FILES.get(session.object_key,{range:{offset:0,length:4}});
@@ -285,6 +290,7 @@ async function handle(request, env) {
           if(!title||!description||!category){ await env.FILES.delete(session.object_key); return fail("Для нового приложения нужны title, description и category"); }
           const ins=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,version_code,min_android,size_bytes,apk_key,apk_sha256,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,"draft",userId).run();
           session.app_id=ins.meta.last_row_id;
+          await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
         }
       } else {
         if(!session.app_id) { await env.FILES.delete(session.object_key); return fail("Для медиафайла нужен app_id"); }

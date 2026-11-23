@@ -450,7 +450,9 @@ async function handle(request, env) {
       if(icon instanceof File && icon.size>0) { if(icon.size>2*1024*1024 || !/^image\/(png|jpeg|webp)$/.test(icon.type)) { await env.FILES.delete(key); return fail("Недопустимая иконка"); } iconKey="icons/"+crypto.randomUUID(); await env.FILES.put(iconKey,await icon.arrayBuffer(),{httpMetadata:{contentType:icon.type}}); }
       try {
         const inserted=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,min_android,size_bytes,apk_key,apk_sha256,icon_key,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,version,minAndroid,apk.size,key,digest,iconKey,"published",userId).run();
-        const id=inserted.meta.last_row_id; await audit(env,userId,"app.create",String(id),`sha256=${digest}`); return json({success:true,id,sha256:digest,size_bytes:apk.size},201);
+        const id=inserted.meta.last_row_id;
+        await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(id,version,0,minAndroid,apk.size,key,digest,"").run();
+        await audit(env,userId,"app.create",String(id),`sha256=${digest}`); return json({success:true,id,sha256:digest,size_bytes:apk.size},201);
       } catch(error) { await env.FILES.delete(key); if(iconKey) await env.FILES.delete(iconKey); throw error; }
     }
     if (path.startsWith("/admin/apps/") && method === "PATCH") {

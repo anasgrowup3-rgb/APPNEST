@@ -29,3 +29,5 @@ CREATE TABLE IF NOT EXISTS ad_frequency (
 );
 CREATE INDEX IF NOT EXISTS idx_upload_sessions_expiry ON upload_sessions(status,expires_at);
 CREATE INDEX IF NOT EXISTS idx_ad_frequency_day ON ad_frequency(day,ad_id);
+
+ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'ru' CHECK(language IN ('ru','tj','en'));

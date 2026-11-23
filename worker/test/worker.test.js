@@ -252,6 +252,15 @@ test("worker rejects an unconfigured CORS origin instead of emitting wildcard", 
 });
 
 
+
+test("CORS supports an explicit allowlist of multiple Mini App origins", async () => {
+  const environment={...env(),ALLOWED_ORIGIN:"",ALLOWED_ORIGINS:"https://mini.example, https://preview.example"};
+  const allowed=await call("/health",{headers:{Origin:"https://preview.example"},environment});
+  assert.equal(allowed.headers.get("access-control-allow-origin"),"https://preview.example");
+  const denied=await call("/health",{headers:{Origin:"https://attacker.example"},environment});
+  assert.equal(denied.headers.get("access-control-allow-origin"),null);
+});
+
 test("every registered admin route rejects unauthenticated and non-admin callers", async () => {
   const routes = [
     ["GET","/admin/categories"],["POST","/admin/categories"],["PATCH","/admin/categories/1"],["DELETE","/admin/categories/1"],

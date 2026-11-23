@@ -231,11 +231,13 @@ test("scheduled cleanup aborts expired R2 multipart sessions and batches retenti
 
 test("published media lookup requires an exact referenced key and media namespace", async () => {
   const customEnv={
-    DB:{prepare(sql){return{bind(...args){return{all:async()=>({results:[{icon_key:"media/icon.png",banner_key:null,screenshots_json:'["media/screen.png"]'}]})};}};}},
+    DB:{prepare(sql){return{bind(...args){return{all:async()=>({results:[{icon_key:"icons/legacy.png",banner_key:"media/banner.png",screenshots_json:'["media/screen.png"]'}]})};}};}},
     FILES:{get:async key=>({key,body:new Uint8Array([1])})}
   };
-  assert.equal((await mediaObject(customEnv,"media/icon.png")).key,"media/icon.png");
+  assert.equal((await mediaObject(customEnv,"icons/legacy.png")).key,"icons/legacy.png");
+  assert.equal((await mediaObject(customEnv,"media/banner.png")).key,"media/banner.png");
   assert.equal((await mediaObject(customEnv,"media/screen.png")).key,"media/screen.png");
+  assert.equal(await mediaObject(customEnv,"media/screen.png.evil"),null);
   assert.equal(await mediaObject(customEnv,"media/not-referenced.png"),null);
   assert.equal(await mediaObject(customEnv,"apk/private.apk"),null);
 });

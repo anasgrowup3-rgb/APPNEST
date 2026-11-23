@@ -476,12 +476,20 @@ async function handle(request, env) {
       const apk=form.get("apk"), icon=form.get("icon");
       if(!title || !description || !category || !(apk instanceof File) || apk.size<8 || !apk.name.toLowerCase().endsWith(".apk")) return fail("Укажите название, описание, категорию и корректный APK");
       if(apk.size>Number(env.MAX_DIRECT_APK_BYTES || 16777216)) return fail("Для файлов больше 16 МиБ используйте multipart-загрузку",413);
-      const head=new Uint8Array(await apk.slice(0,4).arrayBuffer()); if(head[0]!==0x50 || head[1]!==0x4b) return fail("APK не имеет ZIP-сигнатуру");
+      const head=new Uint8Array(await apk.slice(0,4).arrayBuffer()); if(head.length<4||head[0]!==0x50||head[1]!==0x4b||head[2]!==0x03||head[3]!==0x04) return fail("APK не имеет ZIP-сигнатуру");
       if(!env.FILES) return fail("R2 binding FILES не настроен",503);
       const bytes=await apk.arrayBuffer(); const digest=hex(await crypto.subtle.digest("SHA-256",bytes)); const key="apk/"+crypto.randomUUID()+".apk";
       await env.FILES.put(key,bytes,{httpMetadata:{contentType:"application/vnd.android.package-archive"}});
       let iconKey=null;
-      if(icon instanceof File && icon.size>0) { if(icon.size>2*1024*1024 || !/^image\/(png|jpeg|webp)$/.test(icon.type)) { await env.FILES.delete(key); return fail("Недопустимая иконка"); } iconKey="icons/"+crypto.randomUUID(); await env.FILES.put(iconKey,await icon.arrayBuffer(),{httpMetadata:{contentType:icon.type}}); }
+      if(icon instanceof File && icon.size>0) {
+        if(icon.size>2*1024*1024 || !/^image\/(png|jpeg|webp)$/.test(icon.type)) { await env.FILES.delete(key); return fail("Недопустимая иконка"); }
+        const iconBytes=await icon.arrayBuffer(),sig=new Uint8Array(iconBytes.slice(0,12));
+        const png=sig.length>=8&&sig[0]===137&&sig[1]===80&&sig[2]===78&&sig[3]===71&&sig[4]===13&&sig[5]===10&&sig[6]===26&&sig[7]===10;
+        const jpeg=sig[0]===255&&sig[1]===216&&sig[2]===255;
+        const webp=sig.length>=12&&String.fromCharCode(...sig.slice(0,4))==="RIFF"&&String.fromCharCode(...sig.slice(8,12))==="WEBP";
+        if(!(png||jpeg||webp)) { await env.FILES.delete(key); return fail("Содержимое иконки не соответствует MIME-типу"); }
+        iconKey="icons/"+crypto.randomUUID(); await env.FILES.put(iconKey,iconBytes,{httpMetadata:{contentType:icon.type}});
+      }
       try {
         const inserted=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,min_android,size_bytes,apk_key,apk_sha256,icon_key,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,version,minAndroid,apk.size,key,digest,iconKey,"published",userId).run();
         const id=inserted.meta.last_row_id;
@@ -534,9 +542,9 @@ export { sha256Readable };
 export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin");
-    const allowed = env.ALLOWED_ORIGIN || "*";
+    const allowed = clean(env.ALLOWED_ORIGIN, 500);
     const cors = { "vary": "Origin" };
-    if (allowed === "*" || (origin && origin === allowed)) cors["access-control-allow-origin"] = allowed === "*" ? "*" : origin;
+    if (allowed && origin === allowed) cors["access-control-allow-origin"] = origin;
     try {
       const response = await handle(request,env);
       const headers = new Headers(response.headers);

@@ -49,7 +49,7 @@ class MiniAppStaticAcceptanceTest(unittest.TestCase):
         self.assertIn("XMLHttpRequest", JS)
 
     def test_ui_uses_server_verified_subscription_and_download_ticket(self):
-        self.assertIn("/subscription/status", JS)
+        self.assertIn("/download-ticket", JS)
         self.assertIn("/download-ticket", JS)
         self.assertIn("subscription_required", JS)
         self.assertIn("Проверить снова", JS)

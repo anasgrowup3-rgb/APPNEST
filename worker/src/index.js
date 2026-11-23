@@ -227,9 +227,8 @@ async function handle(request, env) {
     const ad=await env.DB.prepare("SELECT id FROM ad_campaigns WHERE id=? AND active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now')").bind(id).first();
     if(!ad) return fail("Реклама не найдена",404);
     if(action==="impression"){
-      await env.DB.prepare("INSERT INTO ad_frequency(user_id,ad_id,day,impressions) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET impressions=impressions+1 WHERE impressions<3").bind(userId,id,today).run();
-      const row=await env.DB.prepare("SELECT impressions FROM ad_frequency WHERE user_id=? AND ad_id=? AND day=?").bind(userId,id,today).first();
-      if((row?.impressions||0)>3) return json({success:true,limited:true});
+      const changed=await env.DB.prepare("INSERT INTO ad_frequency(user_id,ad_id,day,impressions) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET impressions=impressions+1 WHERE impressions<3").bind(userId,id,today).run();
+      if(!changed.meta?.changes) return json({success:true,limited:true});
       await env.DB.prepare("UPDATE ad_campaigns SET impressions=impressions+1 WHERE id=?").bind(id).run();
     }else{
       await env.DB.prepare("INSERT INTO ad_frequency(user_id,ad_id,day,clicks) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET clicks=clicks+1").bind(userId,id,today).run();

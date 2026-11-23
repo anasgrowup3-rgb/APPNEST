@@ -38,9 +38,12 @@ async function verifyTelegram(initData, token, maxAge = 86400) {
   } catch { return null; }
 }
 async function readJson(request) {
-  const length = Number(request.headers.get("content-length") || 0);
-  if (length > MAX_JSON) throw new Error("Слишком большой запрос");
-  return await request.json();
+  const body=await request.text();
+  if(encoder.encode(body).byteLength>MAX_JSON) throw Object.assign(new Error("Слишком большой запрос"),{status:413});
+  let value;
+  try{value=JSON.parse(body);}catch{throw Object.assign(new Error("Некорректный JSON"),{status:400});}
+  if(!value||typeof value!=="object"||Array.isArray(value)) throw Object.assign(new Error("Ожидается JSON-объект"),{status:400});
+  return value;
 }
 async function rateLimit(env, key, limit = 60, windowSeconds = 60) {
   if (!env.DB) return false;
@@ -299,6 +302,7 @@ async function handle(request, env) {
       if(!env.FILES) return fail("R2 binding FILES не настроен",503);
       const b=await readJson(request),kind=clean(b.kind,20),size=Number(b.size_bytes),name=clean(b.filename,160),mime=clean(b.content_type,100);
       const appId=b.app_id==null?null:Number(b.app_id);
+      if(b.app_id!=null&&(!Number.isSafeInteger(appId)||appId<1)) return fail("Некорректный app_id");
       const isApk=kind==="apk",isImage=["icon","banner","screenshot"].includes(kind);
       if((!isApk&&!isImage)||!Number.isSafeInteger(size)||size<(isApk?8:1)||size>Number(isApk?(env.MAX_APK_BYTES||2147483648):10485760)) return fail("Недопустимый тип или размер файла",413);
       if(isApk&&!name.toLowerCase().endsWith(".apk")) return fail("Требуется APK-файл");
@@ -540,8 +544,10 @@ export default {
       for (const [k,v] of Object.entries(cors)) headers.set(k,v);
       return new Response(response.body,{status:response.status,headers});
     } catch (error) {
-      console.error("APPNEST API error:", error?.message || "internal error");
-      return fail("Внутренняя ошибка сервера",500);
+      const status=error?.status===413?413:error?.status===400?400:500;
+      if(status===500) console.error("APPNEST API error:", error?.message || "internal error");
+      const message=status===500?"Внутренняя ошибка сервера":(error?.message||"Некорректный запрос");
+      return new Response(JSON.stringify({success:false,error:message}),{status,headers:{...JSON_HEADERS,...cors}});
     }
   }
 };

@@ -79,10 +79,14 @@ test("media route does not expose arbitrary R2 keys", async () => {
   const response = await call("/media/private.apk");
   assert.equal(response.status, 404);
 });
-test("preflight advertises Telegram auth header", async () => {
+test("preflight advertises Telegram auth header only to configured origin", async () => {
   const response = await call("/health", { method: "OPTIONS", headers: { Origin: "https://mini.example" } });
   assert.equal(response.status, 204);
   assert.match(response.headers.get("access-control-allow-headers"), /X-Telegram-Init-Data/);
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://mini.example");
+  const denied = await call("/health", { method: "OPTIONS", headers: { Origin: "https://attacker.example" } });
+  assert.equal(denied.status, 204);
+  assert.equal(denied.headers.get("access-control-allow-origin"), null);
 });
 
 test("streaming SHA-256 matches known digest across arbitrary chunks", async () => {

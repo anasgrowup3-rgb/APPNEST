@@ -154,7 +154,7 @@ async function handle(request, env) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api/, "").replace(/\/$/, "") || "/";
   const method = request.method;
-  if (method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": env.ALLOWED_ORIGIN || "*", "access-control-allow-methods": "GET,POST,PUT,DELETE,PATCH,OPTIONS", "access-control-allow-headers": "Content-Type,X-Telegram-Init-Data", "access-control-max-age": "86400" } });
+  if (method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-methods": "GET,POST,PUT,DELETE,PATCH,OPTIONS", "access-control-allow-headers": "Content-Type,X-Telegram-Init-Data", "access-control-max-age": "86400" } });
   if (!env.DB) return fail("D1 binding DB не настроен", 503);
   if (path === "/health" && method === "GET") return json({ success: true, service: "APPNEST API", status: "online", storage: !!env.FILES });
   if (path === "/categories" && method === "GET") { const {results=[]}=await env.DB.prepare("SELECT slug,title,icon FROM categories ORDER BY sort_order,title").all(); return json({success:true,categories:results}); }

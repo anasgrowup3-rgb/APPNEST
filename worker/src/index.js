@@ -312,10 +312,11 @@ async function handle(request, env) {
         const signatureObject=await env.FILES.get(session.object_key,{range:{offset:0,length:4}});
         const sig=new Uint8Array(await signatureObject.arrayBuffer());
         if(sig[0]!==0x50||sig[1]!==0x4b){ await env.FILES.delete(session.object_key); await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run(); return fail("Файл не имеет ZIP-сигнатуру"); }
-        const sha=clean(session.client_sha256,64);
-        if(!/^[a-f0-9]{64}$/.test(sha)){ await env.FILES.delete(session.object_key); await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run(); return fail("Не передан SHA-256 файла"); }
+        const suppliedSha=clean(session.client_sha256,64);
+        if(suppliedSha && !/^[a-f0-9]{64}$/.test(suppliedSha)){await env.FILES.delete(session.object_key);return fail("Некорректный SHA-256");}
         const actualSha=await sha256Readable(stored.body);
-        if(actualSha!==sha){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("SHA-256 не совпадает: файл повреждён или изменён",422);}
+        if(suppliedSha && actualSha!==suppliedSha){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("SHA-256 не совпадает: файл повреждён или изменён",422);}
+        const sha=actualSha;
         if(session.app_id){
           const app=await env.DB.prepare("SELECT id,apk_key FROM apps WHERE id=?").bind(session.app_id).first();
           await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
@@ -329,6 +330,12 @@ async function handle(request, env) {
           await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
         }
       } else {
+        const sampleObject=await env.FILES.get(session.object_key,{range:{offset:0,length:12}});
+        const sample=new Uint8Array(await sampleObject.arrayBuffer());
+        const isPng=sample.length>=8&&sample[0]===137&&sample[1]===80&&sample[2]===78&&sample[3]===71;
+        const isJpeg=sample[0]===255&&sample[1]===216&&sample[2]===255;
+        const isWebp=sample.length>=12&&String.fromCharCode(...sample.slice(0,4))==="RIFF"&&String.fromCharCode(...sample.slice(8,12))==="WEBP";
+        if(!(isPng||isJpeg||isWebp)){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Содержимое не соответствует разрешённому формату изображения");}
         if(!session.app_id) { await env.FILES.delete(session.object_key); return fail("Для медиафайла нужен app_id"); }
         const column=meta.kind==="icon"?"icon_key":meta.kind==="banner"?"banner_key":null;
         if(column) await env.DB.prepare("UPDATE apps SET "+column+"=?,updated_at=datetime('now') WHERE id=?").bind(session.object_key,session.app_id).run();

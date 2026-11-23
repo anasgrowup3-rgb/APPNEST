@@ -15,11 +15,11 @@ Configure these on the existing Worker in the Cloudflare dashboard (or in the ex
 - Optional **MAX_DIRECT_APK_BYTES** — legacy single-request upload limit, default 16 MiB.
 - Optional **TELEGRAM_AUTH_MAX_AGE** — Telegram initData maximum age in seconds, default 86400.
 
-The repository's `worker/wrangler.jsonc` deliberately does not contain fabricated D1 database IDs or R2 bucket names. Add the actual identifiers once the resources exist. The binding names must remain exactly `DB` and `FILES`.
+The repository's `worker/wrangler.jsonc` includes an hourly cleanup Cron trigger and deliberately does not contain fabricated D1 database IDs or R2 bucket names. Add the actual identifiers once the resources exist. The binding names must remain exactly `DB` and `FILES`.
 
 ## Migrations
 
-Back up D1 before applying migrations. Both migrations are additive; they do not delete existing application/user rows.
+Back up D1 before applying migrations. Both migrations are additive and do not delete existing application/user rows. Wrangler tracks applied migrations; do not run the ALTER TABLE migration manually a second time.
 
 From the `worker` directory, apply them to the intended database:
 
@@ -62,7 +62,7 @@ Active campaigns are returned from `GET /api/ads`. The Mini App marks ad cards a
 
 The existing bot continues to use its own SQLite database at `data/apps.db`; this change does not migrate or merge that catalog with D1. Set `WEBAPP_URL` in the bot's private `.env` to the deployed HTTPS Mini App URL. The bot then displays an **Открыть APPNEST** Web App keyboard and supports `/open` and `/catalog`. Do not commit `.env`.
 
-## Tests
+## Scheduled cleanup\n\nThe Worker runs an hourly scheduled handler. It aborts expired open R2 multipart uploads, marks their sessions failed, deletes expired/consumed download tickets and old rate-limit/ad-frequency rows, and prunes completed/aborted/failed upload-session metadata older than 30 days. It does not delete APK/media objects or application/user records.\n\n## Tests
 
 From `worker`:
 

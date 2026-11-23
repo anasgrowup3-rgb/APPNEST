@@ -572,7 +572,7 @@ async function cleanupExpired(env) {
   ]);
 }
 function safeArray(value) { try { const x=JSON.parse(value||"[]"); return Array.isArray(x)?x:[]; } catch { return []; } }
-export { sha256Readable, cleanupExpired };
+export { sha256Readable, cleanupExpired, mediaObject };
 export default {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(cleanupExpired(env));

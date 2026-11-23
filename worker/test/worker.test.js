@@ -38,10 +38,11 @@ function signedInitData(userId = 42, ageSeconds = 0) {
   params.set("hash", createHmac("sha256", secret).update(check).digest("hex"));
   return params.toString();
 }
-async function call(path, { method = "GET", initData, body, headers = {}, environment = env() } = {}) {
+async function call(path, { method = "GET", initData, body, rawBody, headers = {}, environment = env() } = {}) {
   const h = new Headers(headers);
   if (initData) h.set("X-Telegram-Init-Data", initData);
-  if (body !== undefined) { h.set("content-type", "application/json"); body = JSON.stringify(body); }
+  if (rawBody !== undefined) { h.set("content-type", "application/json"); body=rawBody; }
+  else if (body !== undefined) { h.set("content-type", "application/json"); body = JSON.stringify(body); }
   return worker.fetch(new Request("https://api.example/api" + path, { method, headers: h, body }), environment);
 }
 
@@ -164,4 +165,13 @@ test("admin campaign creation rejects invalid date strings", async () => {
     body:{title:"Test",kind:"banner",target_url:"https://example.com",starts_at:"not-a-date",ends_at:"also-not-a-date"}
   });
   assert.equal(response.status,400);
+});
+
+test("malformed JSON receives a client error instead of an internal error", async () => {
+  const response=await call("/feedback",{method:"POST",initData:signedInitData(42),rawBody:"{broken"});
+  assert.equal(response.status,400);
+});
+test("JSON body size is enforced even when Content-Length is not trusted", async () => {
+  const response=await call("/feedback",{method:"POST",initData:signedInitData(42),rawBody:JSON.stringify({message:"x".repeat(70000)})});
+  assert.equal(response.status,413);
 });

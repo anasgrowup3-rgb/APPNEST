@@ -184,7 +184,6 @@ async function handle(request, env) {
     const key = decodeURIComponent(path.slice(7));
     const object = await mediaObject(env,key);
     if (!object) return fail("Файл не найден", 404);
-    if (!object) return fail("Файл не найден", 404);
     return new Response(object.body, { headers: { "content-type": object.httpMetadata?.contentType || "application/octet-stream", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
   }
   const session = await auth(request, env);
@@ -314,8 +313,11 @@ async function handle(request, env) {
       const session=await uploadOwner(env,id,userId);
       if(!session) return fail("Загрузка не найдена или истекла",404);
       if(!Number.isSafeInteger(part)||part<1||part>10000) return fail("Некорректный номер части");
+      const partSize=8388608,expectedParts=Math.ceil(session.expected_size/partSize);
+      if(part>expectedParts) return fail("Номер части превышает ожидаемое количество");
       const length=Number(request.headers.get("content-length")||0);
-      if(!length||length>8388608) return fail("Часть должна быть от 1 до 8 МиБ",413);
+      const expectedLength=part===expectedParts?session.expected_size-partSize*(expectedParts-1):partSize;
+      if(!length||length!==expectedLength) return fail("Размер части не совпадает с ожидаемым размером R2 multipart",413);
       const current=await env.DB.prepare("SELECT COALESCE(SUM(size_bytes),0) n FROM upload_parts WHERE upload_id=? AND part_number<>?").bind(id,part).first();
       if((current?.n||0)+length>session.expected_size) return fail("Части превышают заявленный размер",413);
       const upload=env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id);
@@ -327,7 +329,17 @@ async function handle(request, env) {
       if(!env.FILES) return fail("R2 binding FILES не настроен",503);
       const id=path.split("/")[3],session=await uploadOwner(env,id,userId);
       if(!session) return fail("Загрузка не найдена или истекла",404);
-      const meta=safeJson(session.metadata_json),{results:parts=[]}=await env.DB.prepare("SELECT part_number,etag,size_bytes FROM upload_parts WHERE upload_id=? ORDER BY part_number").bind(id).all();
+      const meta=safeJson(session.metadata_json);
+      if(meta.kind==="apk"&&!session.app_id){
+        const data=meta.metadata||{};
+        if(!clean(data.title,100)||!clean(data.description,5000)||!clean(data.category,80)) return fail("Для нового приложения нужны title, description и category");
+      }
+      if(meta.kind!=="apk"&&!session.app_id) return fail("Для медиафайла нужен app_id");
+      if(session.app_id){
+        const existing=await env.DB.prepare("SELECT id FROM apps WHERE id=?").bind(session.app_id).first();
+        if(!existing) return fail("Приложение не найдено",404);
+      }
+      const {results:parts=[]}=await env.DB.prepare("SELECT part_number,etag,size_bytes FROM upload_parts WHERE upload_id=? ORDER BY part_number").bind(id).all();
       const total=parts.reduce((n,p)=>n+p.size_bytes,0);
       if(!parts.length||total!==session.expected_size||parts.some((p,i)=>p.part_number!==i+1)) return fail("Не все части загружены или размер не совпадает",409);
       const upload=env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id);
@@ -338,9 +350,9 @@ async function handle(request, env) {
       if(meta.kind==="apk"){
         const signatureObject=await env.FILES.get(session.object_key,{range:{offset:0,length:4}});
         const sig=new Uint8Array(await signatureObject.arrayBuffer());
-        if(sig[0]!==0x50||sig[1]!==0x4b){ await env.FILES.delete(session.object_key); await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run(); return fail("Файл не имеет ZIP-сигнатуру"); }
+        if(sig.length<4||sig[0]!==0x50||sig[1]!==0x4b||sig[2]!==0x03||sig[3]!==0x04){ await env.FILES.delete(session.object_key); await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run(); return fail("Файл не имеет ZIP-сигнатуру"); }
         const suppliedSha=clean(session.client_sha256,64);
-        if(suppliedSha && !/^[a-f0-9]{64}$/.test(suppliedSha)){await env.FILES.delete(session.object_key);return fail("Некорректный SHA-256");}
+        if(suppliedSha && !/^[a-f0-9]{64}$/.test(suppliedSha)){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Некорректный SHA-256");}
         const actualSha=await sha256Readable(stored.body);
         if(suppliedSha && actualSha!==suppliedSha){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("SHA-256 не совпадает: файл повреждён или изменён",422);}
         const sha=actualSha; verifiedApkSha=sha;
@@ -359,11 +371,10 @@ async function handle(request, env) {
       } else {
         const sampleObject=await env.FILES.get(session.object_key,{range:{offset:0,length:12}});
         const sample=new Uint8Array(await sampleObject.arrayBuffer());
-        const isPng=sample.length>=8&&sample[0]===137&&sample[1]===80&&sample[2]===78&&sample[3]===71;
+        const isPng=sample.length>=8&&sample[0]===137&&sample[1]===80&&sample[2]===78&&sample[3]===71&&sample[4]===13&&sample[5]===10&&sample[6]===26&&sample[7]===10;
         const isJpeg=sample[0]===255&&sample[1]===216&&sample[2]===255;
         const isWebp=sample.length>=12&&String.fromCharCode(...sample.slice(0,4))==="RIFF"&&String.fromCharCode(...sample.slice(8,12))==="WEBP";
         if(!(isPng||isJpeg||isWebp)){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Содержимое не соответствует разрешённому формату изображения");}
-        if(!session.app_id) { await env.FILES.delete(session.object_key); return fail("Для медиафайла нужен app_id"); }
         const column=meta.kind==="icon"?"icon_key":meta.kind==="banner"?"banner_key":null;
         if(column) await env.DB.prepare("UPDATE apps SET "+column+"=?,updated_at=datetime('now') WHERE id=?").bind(session.object_key,session.app_id).run();
         else {
@@ -377,10 +388,10 @@ async function handle(request, env) {
       return json({success:true,app_id:session.app_id,object_key:session.object_key,sha256:verifiedApkSha});
     }
     if (path.startsWith("/admin/uploads/") && method === "DELETE") {
-      const id=path.split("/")[3],session=await uploadOwner(env,id,userId);
+      const id=path.split("/")[3],session=await env.DB.prepare("SELECT * FROM upload_sessions WHERE id=? AND owner_id=? AND status='open'").bind(id,userId).first();
       if(!session) return fail("Загрузка не найдена",404);
-      await env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id).abort();
-      await env.DB.prepare("UPDATE upload_sessions SET status='aborted' WHERE id=?").bind(id).run();
+      try{await env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id).abort();}catch(error){console.warn("R2 multipart abort:",error?.message||"failed");}
+      await env.DB.prepare("UPDATE upload_sessions SET status='aborted' WHERE id=? AND owner_id=? AND status='open'").bind(id,userId).run();
       return json({success:true});
     }
     if (path.startsWith("/admin/apps/") && path.endsWith("/versions") && method === "GET") {

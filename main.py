@@ -531,7 +531,7 @@ def handle_apk(message):
         admin_states.pop(user_id, None)
 
     except Exception as error:
-        print("APK ERROR:", error)
+        print("APK ERROR: upload operation failed")
         bot.reply_to(
             message,
             "❌ Ошибка при сохранении APK."

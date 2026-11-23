@@ -408,7 +408,7 @@ async function handle(request, env) {
         }
       }
       await env.DB.prepare("UPDATE upload_sessions SET status='completed' WHERE id=?").bind(id).run();
-      await audit(env,userId,"upload.complete",id,meta.kind);
+      try{await audit(env,userId,"upload.complete",id,meta.kind);}catch(error){console.warn("Upload audit event was not saved:",error?.message||"audit failed");}
       return json({success:true,app_id:session.app_id,object_key:session.object_key,sha256:verifiedApkSha});
     }
     if (path.startsWith("/admin/uploads/") && method === "DELETE") {
@@ -498,12 +498,17 @@ async function handle(request, env) {
         if(!(png||jpeg||webp)) { await env.FILES.delete(key); return fail("Содержимое иконки не соответствует MIME-типу"); }
         iconKey="icons/"+crypto.randomUUID(); await env.FILES.put(iconKey,iconBytes,{httpMetadata:{contentType:icon.type}});
       }
+      let createdAppId=null;
       try {
         const inserted=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,min_android,size_bytes,apk_key,apk_sha256,icon_key,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,version,minAndroid,apk.size,key,digest,iconKey,"published",userId).run();
-        const id=inserted.meta.last_row_id;
-        await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(id,version,0,minAndroid,apk.size,key,digest,"").run();
-        await audit(env,userId,"app.create",String(id),`sha256=${digest}`); return json({success:true,id,sha256:digest,size_bytes:apk.size},201);
-      } catch(error) { await env.FILES.delete(key); if(iconKey) await env.FILES.delete(iconKey); throw error; }
+        createdAppId=inserted.meta.last_row_id;
+        await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(createdAppId,version,0,minAndroid,apk.size,key,digest,"").run();
+      } catch(error) {
+        if(createdAppId) await env.DB.prepare("DELETE FROM apps WHERE id=?").bind(createdAppId).run();
+        await env.FILES.delete(key); if(iconKey) await env.FILES.delete(iconKey); throw error;
+      }
+      try{await audit(env,userId,"app.create",String(createdAppId),`sha256=${digest}`);}catch(error){console.warn("App audit event was not saved:",error?.message||"audit failed");}
+      return json({success:true,id:createdAppId,sha256:digest,size_bytes:apk.size},201);
     }
     if (path.startsWith("/admin/apps/") && method === "PATCH") {
       const id=Number(path.split("/")[3]); const body=await readJson(request);

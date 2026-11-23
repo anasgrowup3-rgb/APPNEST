@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const API = "/api";
+  const API = "https://appnest-api.anas-grow-up-3.workers.dev/api";
   const PAGE_SIZE = 12;
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];

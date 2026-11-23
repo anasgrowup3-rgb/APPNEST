@@ -213,6 +213,19 @@
     }
   }
 
+  async function loadAds() {
+    const slot=$("#adSlot");if(!slot||!initData)return;
+    try{
+      const data=await request("/ads"),ads=data.ads||[];
+      if(!ads.length){slot.hidden=true;slot.innerHTML="";return;}
+      slot.hidden=false;
+      slot.innerHTML=ads.map(ad=>`<a class="ad-card" href="${escapeHTML(ad.target_url)}" target="_blank" rel="noopener noreferrer" data-ad-click="${ad.id}">
+        <span class="ad-label">Реклама</span>${ad.creative_url?'<img src="'+escapeHTML(ad.creative_url)+'" alt="" loading="lazy">':""}
+        <strong>${escapeHTML(ad.title)}</strong><span>Подробнее ↗</span></a>`).join("");
+      for(const ad of ads) request("/ads/"+ad.id+"/impression",{method:"POST",body:JSON.stringify({})}).catch(()=>{});
+    }catch(error){console.warn("APPNEST ads:",error.message);slot.hidden=true;}
+  }
+
   function renderHome() {
     const popular = [...state.apps]
       .sort((a, b) => (b.downloads || 0) - (a.downloads || 0))
@@ -647,6 +660,9 @@
       return;
     }
 
+    const adLink=event.target.closest("[data-ad-click]");
+    if(adLink){const id=adLink.dataset.adClick;request("/ads/"+id+"/click",{method:"POST",body:JSON.stringify({})}).catch(()=>{});return;}
+
     const openButton = event.target.closest("[data-open-app]");
     if (openButton) {
       openDetails(openButton.dataset.openApp);
@@ -798,7 +814,8 @@
     }
     await Promise.all([
           loadApps(),
-      loadProfileData()
+      loadProfileData(),
+      loadAds()
     ]);
 
     renderProfile();

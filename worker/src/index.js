@@ -538,7 +538,6 @@ export default {
       const headers = new Headers(response.headers);
       headers.delete("access-control-allow-origin");
       for (const [k,v] of Object.entries(cors)) headers.set(k,v);
-      if (request.method === "OPTIONS") return response;
       return new Response(response.body,{status:response.status,headers});
     } catch (error) {
       console.error("APPNEST API error:", error?.message || "internal error");

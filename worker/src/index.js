@@ -99,6 +99,36 @@ async function logDownload(env, userId, appId) {
   await env.DB.prepare("UPDATE apps SET downloads=downloads+1 WHERE id=?").bind(appId).run();
 }
 
+
+const SHA256_K = new Uint32Array([
+0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+]);
+async function sha256Readable(stream) {
+  const H=new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+  const reader=stream.getReader();let carry=new Uint8Array(0),length=0;
+  const rotr=(x,n)=>(x>>>n)|(x<<(32-n));
+  function compress(block){
+    const w=new Uint32Array(64);
+    for(let i=0;i<16;i++){const j=i*4;w[i]=((block[j]<<24)|(block[j+1]<<16)|(block[j+2]<<8)|block[j+3])>>>0;}
+    for(let i=16;i<64;i++){const a=w[i-15],b=w[i-2],s0=rotr(a,7)^rotr(a,18)^(a>>>3),s1=rotr(b,17)^rotr(b,19)^(b>>>10);w[i]=(w[i-16]+s0+w[i-7]+s1)>>>0;}
+    let [a,b,c,d,e,f,g,h]=H;
+    for(let i=0;i<64;i++){const S1=rotr(e,6)^rotr(e,11)^rotr(e,25),ch=(e&f)^(~e&g),t1=(h+S1+ch+SHA256_K[i]+w[i])>>>0,S0=rotr(a,2)^rotr(a,13)^rotr(a,22),maj=(a&b)^(a&c)^(b&c),t2=(S0+maj)>>>0;h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;}
+    H[0]=(H[0]+a)>>>0;H[1]=(H[1]+b)>>>0;H[2]=(H[2]+c)>>>0;H[3]=(H[3]+d)>>>0;H[4]=(H[4]+e)>>>0;H[5]=(H[5]+f)>>>0;H[6]=(H[6]+g)>>>0;H[7]=(H[7]+h)>>>0;
+  }
+  while(true){const {value,done}=await reader.read();if(done)break;length+=value.length;const merged=new Uint8Array(carry.length+value.length);merged.set(carry);merged.set(value,carry.length);let offset=0;while(offset+64<=merged.length){compress(merged.subarray(offset,offset+64));offset+=64;}carry=merged.slice(offset);}
+  const padLength=carry.length<56?64:128,padded=new Uint8Array(padLength);padded.set(carry);padded[carry.length]=0x80;
+  const bits=BigInt(length)*8n;for(let i=0;i<8;i++)padded[padLength-1-i]=Number((bits>>BigInt(i*8))&255n);
+  for(let i=0;i<padLength;i+=64)compress(padded.subarray(i,i+64));
+  return [...H].map(v=>v.toString(16).padStart(8,"0")).join("");
+}
+
 function safeJson(value, fallback = {}) { try { return JSON.parse(value || ""); } catch { return fallback; } }
 function validHttpUrl(value) { try { const u=new URL(value); return u.protocol==="https:" && !u.username && !u.password; } catch { return false; } }
 async function adminSession(request, env) { const a=await adminAuth(request,env); return a.error ? null : a; }
@@ -275,13 +305,17 @@ async function handle(request, env) {
       const total=parts.reduce((n,p)=>n+p.size_bytes,0);
       if(!parts.length||total!==session.expected_size||parts.some((p,i)=>p.part_number!==i+1)) return fail("Не все части загружены или размер не совпадает",409);
       const upload=env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id);
-      const object=await upload.complete(parts.map(p=>({partNumber:p.part_number,etag:p.etag})));
-      const stored=await env.FILES.get(session.object_key,{range:{offset:0,length:4}});
+      await upload.complete(parts.map(p=>({partNumber:p.part_number,etag:p.etag})));
+      const stored=await env.FILES.get(session.object_key);
+      if(!stored){await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Объект не найден после завершения загрузки",500);}
       if(meta.kind==="apk"){
-        const sig=new Uint8Array(await stored.arrayBuffer());
+        const signatureObject=await env.FILES.get(session.object_key,{range:{offset:0,length:4}});
+        const sig=new Uint8Array(await signatureObject.arrayBuffer());
         if(sig[0]!==0x50||sig[1]!==0x4b){ await env.FILES.delete(session.object_key); await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run(); return fail("Файл не имеет ZIP-сигнатуру"); }
         const sha=clean(session.client_sha256,64);
         if(!/^[a-f0-9]{64}$/.test(sha)){ await env.FILES.delete(session.object_key); await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run(); return fail("Не передан SHA-256 файла"); }
+        const actualSha=await sha256Readable(stored.body);
+        if(actualSha!==sha){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("SHA-256 не совпадает: файл повреждён или изменён",422);}
         if(session.app_id){
           const app=await env.DB.prepare("SELECT id,apk_key FROM apps WHERE id=?").bind(session.app_id).first();
           await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
@@ -291,6 +325,7 @@ async function handle(request, env) {
           if(!title||!description||!category){ await env.FILES.delete(session.object_key); return fail("Для нового приложения нужны title, description и category"); }
           const ins=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,version_code,min_android,size_bytes,apk_key,apk_sha256,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,"draft",userId).run();
           session.app_id=ins.meta.last_row_id;
+          await env.DB.prepare("UPDATE upload_sessions SET app_id=? WHERE id=?").bind(session.app_id,id).run();
           await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
         }
       } else {

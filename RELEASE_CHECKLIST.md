@@ -33,7 +33,8 @@ This checklist is a release gate, not a statement that production is currently a
 - [ ] Verify catalog, search, categories, details, media, versions, favorites, history, profile, feedback, notifications and subscription-gated downloads.
 - [ ] Verify all admin panels and every visible control: apps, categories, versions, uploads, channels, campaigns, users, feedback, notifications, audit and analytics.
 - [ ] Verify Russian, Tajik and English across static and dynamically rendered UI, including error and empty states.
-- [ ] Verify multipart progress, retry on the same selected file, and expired-session recovery on a deliberately interrupted test upload.
+- [ ] Verify multipart progress, retry on the same selected file, idempotent completion after a lost response, and expired-session recovery on a deliberately interrupted test upload.
+- [ ] Verify categories created in the admin panel appear in the home/category filter UI and the admin activity log and daily download chart render correctly.
 
 ## Security and reliability
 

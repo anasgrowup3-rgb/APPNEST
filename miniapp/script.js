@@ -13,6 +13,7 @@
   const state = {
     page: "home",
     apps: [],
+    categories: [],
     filtered: [],
     selectedApp: null,
     favorites: new Set(),
@@ -97,7 +98,16 @@
         }
         if(!done) throw error||new Error("Не удалось загрузить часть "+part);
       }
-      const completed=await request("/admin/uploads/"+encodeURIComponent(session.uploadId)+"/complete",{method:"POST",body:JSON.stringify({})});
+      let completed;
+      try {
+        completed=await request("/admin/uploads/"+encodeURIComponent(session.uploadId)+"/complete",{method:"POST",body:JSON.stringify({})});
+      } catch(error) {
+        if(error.status===404||error.status===410) {
+          sessions.delete(cacheKey);
+          throw new Error("Сессия загрузки истекла. Выберите файл заново для новой загрузки.");
+        }
+        throw error;
+      }
       sessions.delete(cacheKey);
       return completed;
     } catch(error) {
@@ -119,7 +129,9 @@
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      throw new Error(data.error || `Ошибка сервера (${response.status})`);
+      const error = new Error(data.error || `Ошибка сервера (${response.status})`);
+      error.status = response.status;
+      throw error;
     }
 
     return data;
@@ -239,6 +251,36 @@
     }
   }
 
+  async function loadCategories() {
+    try {
+      const data = await request("/categories");
+      state.categories = Array.isArray(data.categories) ? data.categories : [];
+      renderCategoryControls();
+    } catch (error) {
+      console.warn("APPNEST categories:", error.message);
+    }
+  }
+
+  function renderCategoryControls() {
+    const categories = state.categories || [];
+    const grid = $("#categoryGrid");
+    if (grid && categories.length) {
+      const tones = ["purple", "orange", "blue", "green"];
+      grid.innerHTML = categories.map((category, index) =>
+        '<button class="category-card" data-category="' + escapeHTML(category.slug) + '">' +
+        '<span class="category-icon ' + tones[index % tones.length] + '">' + escapeHTML(category.icon || "◇") + '</span>' +
+        '<span>' + escapeHTML(category.title) + '</span></button>'
+      ).join("");
+    }
+    const filter = $("#categoryFilter");
+    if (filter && categories.length) {
+      const selected = state.category === "all" ? "" : state.category;
+      filter.innerHTML = '<option value="">Все категории</option>' + categories.map(category =>
+        '<option value="' + escapeHTML(category.slug) + '">' + escapeHTML(category.title) + '</option>'
+      ).join("");
+      filter.value = selected;
+    }
+  }
   async function loadAds() {
     const slot=$("#adSlot");if(!slot||!initData)return;
     try{
@@ -514,13 +556,25 @@
     try {
       const [data,categories,users,notifications,feedback,audit]=await Promise.all([request("/admin/overview"),request("/admin/categories"),request("/admin/users"),request("/admin/notifications"),request("/admin/feedback"),request("/admin/audit")]);
       state.categories=categories.categories||[];
+      renderCategoryControls();
       $("#adminAppsCount").textContent=data.apps_count??"—";
 $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCount").textContent=data.downloads_count??"—";
       $("#adminAppsList").innerHTML=(data.apps||[]).map(app=>`
         <article class="app-card admin-app-row"><div class="app-card-info"><h3>${escapeHTML(app.title)}</h3><p>${escapeHTML(app.category)} · v${escapeHTML(app.version)} · ${escapeHTML(app.status)}</p><small>${Number(app.downloads)||0} downloads</small></div>
         <div class="admin-actions"><button data-app-status="${app.id}" data-status="${app.status==="published"?"archived":"published"}">${app.status==="published"?"Архив":"Опубликовать"}</button><button data-app-edit="${app.id}" data-title="${escapeHTML(app.title)}" data-description="${escapeHTML(app.description||"")}" data-developer="${escapeHTML(app.developer||"")}" data-category="${escapeHTML(app.category||"other")}">Изменить</button><button data-app-versions="${app.id}">Версии</button><button data-app-update="${app.id}">Обновить APK</button></div></article>`).join("")||"Приложений пока нет";
       $("#adminFeedbackList").innerHTML=(feedback.feedback||[]).map(item=>`<article class="admin-feedback"><p>${escapeHTML(item.message)}</p><small>${escapeHTML(item.created_at||"")} · ${escapeHTML(item.user_id||"")}</small><button data-feedback-resolve="${item.id}">Закрыть</button></article>`).join("")||"Отзывов пока нет";
-      $("#adminAnalytics").innerHTML=`<p>Пользователи: <strong>${data.users_count||0}</strong></p><p>Опубликованные приложения: <strong>${data.apps_count||0}</strong></p><p>Скачивания: <strong>${data.downloads_count||0}</strong></p><h3>Кампании</h3>${(data.ads||[]).map(ad=>`<p>${escapeHTML(ad.title)} · ${ad.impressions} показов · ${ad.clicks} кликов <button data-ad-toggle="${ad.id}" data-active="${ad.active?0:1}">${ad.active?"Выключить":"Включить"}</button><button data-ad-edit="${ad.id}" data-title="${escapeHTML(ad.title)}" data-kind="${escapeHTML(ad.kind)}" data-target="${escapeHTML(ad.target_url)}" data-creative="${escapeHTML(ad.creative_url||"")}" data-starts="${escapeHTML(ad.starts_at)}" data-ends="${escapeHTML(ad.ends_at)}" data-priority="${Number(ad.priority)||0}">Изменить</button><button data-ad-delete="${ad.id}">Удалить</button></p>`).join("")||"Нет кампаний"}`;
+      const daily=data.downloads_by_day||[];
+      const maxDaily=Math.max(1,...daily.map(item=>Number(item.count)||0));
+      const dailyBars=daily.length?daily.map(item=>{
+        const count=Math.max(0,Number(item.count)||0);
+        const width=Math.max(2,Math.round(count/maxDaily*100));
+        const date=new Date(item.day+"T00:00:00");
+        const label=Number.isNaN(date.getTime())?item.day:date.toLocaleDateString();
+        return '<div class="admin-chart-row"><span>'+escapeHTML(label)+'</span><div class="admin-chart-track"><i style="width:'+width+'%"></i></div><strong>'+count+'</strong></div>';
+      }).join(""):"<p>Пока нет данных о скачиваниях.</p>";
+      const campaignRows=(data.ads||[]).map(ad=>'<p>'+escapeHTML(ad.title)+' · '+(Number(ad.impressions)||0)+' показов · '+(Number(ad.clicks)||0)+' кликов <button data-ad-toggle="'+ad.id+'" data-active="'+(ad.active?0:1)+'">'+(ad.active?"Выключить":"Включить")+'</button><button data-ad-edit="'+ad.id+'" data-title="'+escapeHTML(ad.title)+'" data-kind="'+escapeHTML(ad.kind)+'" data-target="'+escapeHTML(ad.target_url)+'" data-creative="'+escapeHTML(ad.creative_url||"")+'" data-starts="'+escapeHTML(ad.starts_at)+'" data-ends="'+escapeHTML(ad.ends_at)+'" data-priority="'+(Number(ad.priority)||0)+'">Изменить</button><button data-ad-delete="'+ad.id+'">Удалить</button></p>').join("")||"Нет кампаний";
+      const auditRows=(audit.events||[]).map(event=>'<article class="admin-audit-row"><strong>'+escapeHTML(event.action)+'</strong><span>'+escapeHTML(event.target||"—")+'</span><small>'+escapeHTML(event.created_at||"")+' · ID '+escapeHTML(event.actor_id||"")+'</small></article>').join("")||"<p>Журнал пока пуст.</p>";
+      $("#adminAnalytics").innerHTML='<div class="admin-metric-grid"><p>Пользователи: <strong>'+(Number(data.users_count)||0)+'</strong></p><p>Опубликованные приложения: <strong>'+(Number(data.apps_count)||0)+'</strong></p><p>Скачивания: <strong>'+(Number(data.downloads_count)||0)+'</strong></p></div><h3>Скачивания по дням</h3><div class="admin-chart">'+dailyBars+'</div><h3>Кампании</h3>'+campaignRows+'<h3>Последние действия администратора</h3>'+auditRows;
       let extra=$("#adminExtras");if(!extra){extra=document.createElement("section");extra.id="adminExtras";extra.className="admin-extras";$("#page-admin").append(extra);}
       extra.innerHTML=`
         <div class="admin-tabs admin-extra-tabs">
@@ -964,7 +1018,8 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
       toast("Откройте APPNEST через Telegram");
     }
     await Promise.all([
-          loadApps(),
+      loadCategories(),
+      loadApps(),
       loadProfileData(),
       loadAds()
     ]);

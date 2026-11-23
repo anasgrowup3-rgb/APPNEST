@@ -357,9 +357,12 @@ async function handle(request, env) {
       const {results:parts=[]}=await env.DB.prepare("SELECT part_number,etag,size_bytes FROM upload_parts WHERE upload_id=? ORDER BY part_number").bind(id).all();
       const total=parts.reduce((n,p)=>n+p.size_bytes,0);
       if(!parts.length||total!==session.expected_size||parts.some((p,i)=>p.part_number!==i+1)) return fail("Не все части загружены или размер не совпадает",409);
-      const upload=env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id);
-      await upload.complete(parts.map(p=>({partNumber:p.part_number,etag:p.etag})));
-      const stored=await env.FILES.get(session.object_key);
+      let stored=await env.FILES.get(session.object_key);
+      if(!stored){
+        const upload=env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id);
+        await upload.complete(parts.map(p=>({partNumber:p.part_number,etag:p.etag})));
+        stored=await env.FILES.get(session.object_key);
+      }
       if(!stored||stored.size!==session.expected_size){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Размер готового объекта не совпадает с заявленным",422);}
       let verifiedApkSha=null;
       if(meta.kind==="apk"){
@@ -379,8 +382,12 @@ async function handle(request, env) {
         } else {
           const data=meta.metadata||{},title=clean(data.title,100),description=clean(data.description,5000),developer=clean(data.developer,120),category=clean(data.category,80);
           if(!title||!description||!category){ await env.FILES.delete(session.object_key); return fail("Для нового приложения нужны title, description и category"); }
-          const ins=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,version_code,min_android,size_bytes,apk_key,apk_sha256,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,"draft",userId).run();
-          session.app_id=ins.meta.last_row_id;
+          const existingApp=await env.DB.prepare("SELECT id FROM apps WHERE apk_key=?").bind(session.object_key).first();
+          if(existingApp) session.app_id=existingApp.id;
+          else {
+            const ins=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,version_code,min_android,size_bytes,apk_key,apk_sha256,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,"draft",userId).run();
+            session.app_id=ins.meta.last_row_id;
+          }
           await env.DB.prepare("UPDATE upload_sessions SET app_id=? WHERE id=?").bind(session.app_id,id).run();
           const known=await env.DB.prepare("SELECT id FROM app_versions WHERE app_id=? AND apk_key=?").bind(session.app_id,session.object_key).first();
           if(!known) await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();

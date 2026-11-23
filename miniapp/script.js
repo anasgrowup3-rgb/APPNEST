@@ -755,10 +755,10 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
     if(statusButton){request("/admin/apps/"+statusButton.dataset.appStatus,{method:"PATCH",body:JSON.stringify({status:statusButton.dataset.status})}).then(loadAdmin).catch(e=>toast(e.message));return;}
     const editApp=event.target.closest("[data-app-edit]");
     if(editApp){openModal(`<h2>Редактировать приложение</h2><form id="editAppForm" data-app-id="${editApp.dataset.appEdit}">
-      <label>Название<input name="title" value="${editApp.dataset.title}" required maxlength="100"></label>
-      <label>Описание<textarea name="description" maxlength="5000">${editApp.dataset.description}</textarea></label>
+      <label>Название<input name="title" value="${escapeHTML(editApp.dataset.title)}" required maxlength="100"></label>
+      <label>Описание<textarea name="description" maxlength="5000">${escapeHTML(editApp.dataset.description)}</textarea></label>
       <label>Категория<select name="category">${(state.categories||[]).map(c=>`<option value="${escapeHTML(c.slug)}" ${c.slug===editApp.dataset.category?"selected":""}>${escapeHTML(c.title)}</option>`).join("")}</select></label>
-      <label>Разработчик<input name="developer" value="${editApp.dataset.developer}" maxlength="120"></label>
+      <label>Разработчик<input name="developer" value="${escapeHTML(editApp.dataset.developer)}" maxlength="120"></label>
       <p>Версия APK изменяется через «Обновить APK».</p>
       <label>Новая иконка<input name="icon" type="file" accept="image/png,image/jpeg,image/webp"></label>
       <label>Новый баннер<input name="banner" type="file" accept="image/png,image/jpeg,image/webp"></label>
@@ -775,12 +775,12 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
     if(adEdit){
       const localValue=value=>(value||"").replace(" ","T").slice(0,16);
       openModal(`<h2>Редактировать кампанию</h2><form id="editAdForm" data-ad-id="${adEdit.dataset.adEdit}">
-        <label>Название<input name="title" value="${adEdit.dataset.title}" required></label>
+        <label>Название<input name="title" value="${escapeHTML(adEdit.dataset.title)}" required></label>
         <label>Тип<select name="kind"><option value="banner">Баннер</option><option value="channel">Telegram-канал</option><option value="task">Задание</option></select></label>
-        <label>Изображение URL<input name="creative_url" value="${adEdit.dataset.creative}"></label>
-        <label>Целевая HTTPS-ссылка<input name="target_url" value="${adEdit.dataset.target}" required></label>
-        <label>Начало<input name="starts_at" type="datetime-local" value="${localValue(adEdit.dataset.starts)}" required></label>
-        <label>Окончание<input name="ends_at" type="datetime-local" value="${localValue(adEdit.dataset.ends)}" required></label>
+        <label>Изображение URL<input name="creative_url" value="${escapeHTML(adEdit.dataset.creative)}"></label>
+        <label>Целевая HTTPS-ссылка<input name="target_url" value="${escapeHTML(adEdit.dataset.target)}" required></label>
+        <label>Начало<input name="starts_at" type="datetime-local" value="${escapeHTML(localValue(adEdit.dataset.starts))}" required></label>
+        <label>Окончание<input name="ends_at" type="datetime-local" value="${escapeHTML(localValue(adEdit.dataset.ends))}" required></label>
         <label>Приоритет<input name="priority" type="number" value="${adEdit.dataset.priority}"></label>
         <button class="primary-button full-button">Сохранить кампанию</button></form>`);
       const kind=$("#editAdForm select[name=kind]");if(kind)kind.value=adEdit.dataset.kind;return;

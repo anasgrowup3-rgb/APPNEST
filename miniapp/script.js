@@ -499,7 +499,7 @@
   async function loadAdmin() {
     if (!state.isAdmin) return navigate("home");
     try {
-      const [data,categories,users,notifications,feedback]=await Promise.all([request("/admin/overview"),request("/admin/categories"),request("/admin/users"),request("/admin/notifications"),request("/admin/feedback")]);
+      const [data,categories,users,notifications,feedback,audit]=await Promise.all([request("/admin/overview"),request("/admin/categories"),request("/admin/users"),request("/admin/notifications"),request("/admin/feedback"),request("/admin/audit")]);
       $("#adminAppsCount").textContent=data.apps_count??"—";
 $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCount").textContent=data.downloads_count??"—";
       $("#adminAppsList").innerHTML=(data.apps||[]).map(app=>`

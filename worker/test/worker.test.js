@@ -175,3 +175,36 @@ test("JSON body size is enforced even when Content-Length is not trusted", async
   const response=await call("/feedback",{method:"POST",initData:signedInitData(42),rawBody:JSON.stringify({message:"x".repeat(70000)})});
   assert.equal(response.status,413);
 });
+
+test("Telegram membership API outage fails closed even in any-channel mode", async () => {
+  const originalFetch=globalThis.fetch;
+  globalThis.fetch=async()=>{throw new Error("Telegram unavailable");};
+  const customEnv={
+    ...env(),
+    DB:{
+      prepare(sql){return{
+        bind(...args){return{
+          first:async()=>{
+            if(sql.includes("SELECT is_blocked"))return{is_blocked:0};
+            if(sql.includes("SELECT count FROM rate_limits"))return{count:1};
+            if(sql.includes("FROM apps WHERE id=? AND status='published'"))return{id:1,apk_key:"apk/test.apk"};
+            if(sql.includes("settings WHERE key='subscription_mode'"))return{value:"any"};
+            return null;
+          },
+          all:async()=>({results:sql.includes("FROM required_channels")?[{chat_id:"@required",title:"Required",invite_url:"https://t.me/required"}]:[]}),
+          run:async()=>({meta:{changes:1}})
+        };},
+        first:async()=>null,
+        all:async()=>({results:sql.includes("FROM required_channels")?[{chat_id:"@required",title:"Required",invite_url:"https://t.me/required"}]:[]}),
+        run:async()=>({meta:{changes:1}})
+      };},
+    }
+  };
+  try{
+    const response=await call("/apps/1/download-ticket",{method:"POST",initData:signedInitData(42),body:{},environment:customEnv});
+    assert.equal(response.status,403);
+    const data=await response.json();
+    assert.equal(data.subscription_required,true);
+    assert.equal(data.mode,"unavailable");
+  }finally{globalThis.fetch=originalFetch;}
+});

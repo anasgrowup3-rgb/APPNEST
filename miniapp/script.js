@@ -518,7 +518,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
         <label>Название<input name="title" required maxlength="100"></label>
         <label>Описание<textarea name="description" required maxlength="5000"></textarea></label>
         <label>Разработчик<input name="developer" maxlength="120"></label>
-        <label>Категория<select name="category"><option value="productivity">Продуктивность</option><option value="games">Игры</option><option value="tools">Инструменты</option><option value="other">Другое</option></select></label>
+        <label>Категория<select name="category">${(state.categories?.length?state.categories:[{slug:"productivity",title:"Продуктивность"},{slug:"games",title:"Игры"},{slug:"tools",title:"Инструменты"},{slug:"other",title:"Другое"}]).map(c=>`<option value="${escapeHTML(c.slug)}">${escapeHTML(c.title)}</option>`).join("")}</select></label>
         <label>Версия<input name="version" placeholder="1.0.0" required></label>
         <label>Version code<input name="version_code" type="number" min="1" required></label>
         <label>Минимальный Android<input name="min_android" placeholder="8.0"></label>

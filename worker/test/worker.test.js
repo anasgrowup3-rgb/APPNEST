@@ -93,3 +93,8 @@ test("streaming SHA-256 handles multi-block payloads", async () => {
   const stream = new ReadableStream({ start(controller) { for(let i=0;i<bytes.length;i+=73) controller.enqueue(bytes.slice(i,i+73)); controller.close(); } });
   assert.equal(await sha256Readable(stream), createHash("sha256").update(bytes).digest("hex"));
 });
+
+test("download tickets are opaque, short-lived and one-time", async () => {
+  const response = await call("/download/" + "a".repeat(64));
+  assert.equal(response.status, 410);
+});

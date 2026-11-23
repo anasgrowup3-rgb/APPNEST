@@ -145,13 +145,13 @@ async function handle(request, env) {
   if (session.error) return session.error;
   const userId = session.user.id;
   if (path === "/me" && method === "GET") {
-    const [favs, history, notes] = await Promise.all([
+    const [favs, history, notes, language] = await Promise.all([
       env.DB.prepare("SELECT app_id FROM favorites WHERE user_id=?").bind(userId).all(),
       env.DB.prepare("SELECT d.app_id,a.title,d.created_at FROM downloads d JOIN apps a ON a.id=d.app_id WHERE d.user_id=? ORDER BY d.created_at DESC LIMIT 100").bind(userId).all(),
       env.DB.prepare("SELECT id,title,message,created_at FROM notifications WHERE active=1 ORDER BY created_at DESC LIMIT 30").all(),
       env.DB.prepare("SELECT language FROM users WHERE telegram_id=?").bind(userId).first()
     ]);
-    return json({ success:true, user:session.user, language:notes[1]?.language || "ru", is_admin:session.isAdmin, favorites:(favs.results||[]).map(x=>String(x.app_id)), history:history.results||[], notifications:notes[0].results||[] });
+    return json({ success:true, user:session.user, language:language?.language || "ru", is_admin:session.isAdmin, favorites:(favs.results||[]).map(x=>String(x.app_id)), history:history.results||[], notifications:notes[0].results||[] });
   }
   if (path === "/me" && method === "PATCH") {
     const b=await readJson(request); if(!["ru","tj","en"].includes(b.language)) return fail("Unsupported language");

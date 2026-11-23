@@ -31,3 +31,9 @@ CREATE INDEX IF NOT EXISTS idx_upload_sessions_expiry ON upload_sessions(status,
 CREATE INDEX IF NOT EXISTS idx_ad_frequency_day ON ad_frequency(day,ad_id);
 
 ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'ru' CHECK(language IN ('ru','tj','en'));
+
+INSERT OR IGNORE INTO categories(slug,title,icon,sort_order) VALUES
+('productivity','Продуктивность','✦',1),
+('games','Игры','◈',2),
+('tools','Инструменты','⌘',3),
+('other','Другое','◇',4);

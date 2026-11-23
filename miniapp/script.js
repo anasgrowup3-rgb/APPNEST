@@ -51,10 +51,9 @@
     });
   }
   async function uploadFileMultipart(file,kind,extra={},onProgress=()=>{}) {
-    const digest=hexDigest(await crypto.subtle.digest("SHA-256",await file.arrayBuffer()));
     const init=await request("/admin/uploads",{method:"POST",body:JSON.stringify({
       kind,filename:file.name,size_bytes:file.size,content_type:file.type||"application/octet-stream",
-      sha256:digest,...extra
+      ...extra
     })});
     const chunkSize=init.part_size||8388608, count=Math.ceil(file.size/chunkSize);
     let sent=0;
@@ -74,7 +73,7 @@
         if(!done) throw error||new Error("Не удалось загрузить часть "+part);
       }
       const completed=await request("/admin/uploads/"+encodeURIComponent(init.upload_id)+"/complete",{method:"POST",body:JSON.stringify({})});
-      return {...completed,sha256:digest};
+      return completed;
     } catch(error) {
       await request("/admin/uploads/"+encodeURIComponent(init.upload_id),{method:"DELETE"}).catch(()=>{});
       throw error;

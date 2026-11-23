@@ -250,3 +250,121 @@ test("worker rejects an unconfigured CORS origin instead of emitting wildcard", 
   const response=await call("/health",{headers:{Origin:"https://mini.example"},environment});
   assert.equal(response.headers.get("access-control-allow-origin"),null);
 });
+
+
+test("every registered admin route rejects unauthenticated and non-admin callers", async () => {
+  const routes = [
+    ["GET","/admin/categories"],["POST","/admin/categories"],["PATCH","/admin/categories/1"],["DELETE","/admin/categories/1"],
+    ["POST","/admin/uploads"],["PUT","/admin/uploads/upload-1/parts"],["POST","/admin/uploads/upload-1/complete"],["DELETE","/admin/uploads/upload-1"],
+    ["GET","/admin/apps/1/versions"],["PATCH","/admin/channels/1"],["DELETE","/admin/channels/1"],
+    ["PATCH","/admin/ads/1"],["DELETE","/admin/ads/1"],["GET","/admin/notifications"],["PATCH","/admin/notifications/1"],
+    ["PATCH","/admin/feedback/1"],["GET","/admin/users"],["GET","/admin/overview"],["POST","/admin/apps"],
+    ["PATCH","/admin/apps/1"],["POST","/admin/channels"],["PUT","/admin/subscription-mode"],["POST","/admin/ads"],
+    ["PATCH","/admin/users/1"],["POST","/admin/notifications"],["GET","/admin/feedback"],["GET","/admin/audit"]
+  ];
+  for (const [method,path] of routes) {
+    const unauthenticated = await call(path,{method});
+    assert.equal(unauthenticated.status,401,method+" "+path+" must reject missing initData");
+    const nonAdmin = await call(path,{method,initData:signedInitData(7)});
+    assert.equal(nonAdmin.status,403,method+" "+path+" must reject non-admin users");
+  }
+});
+
+test("Telegram initData rejects a modified user payload even when original hash is retained", async () => {
+  const params = new URLSearchParams(signedInitData(42));
+  params.set("user",JSON.stringify({id:7,first_name:"Attacker"}));
+  const response = await call("/me",{initData:params.toString()});
+  assert.equal(response.status,401);
+});
+
+test("multipart image upload streams a part, completes, and attaches media using R2 mock", async () => {
+  const png = Uint8Array.from([137,80,78,71,13,10,26,10,0,0,0,0]);
+  let session = null, partRows = [], uploaded = null, completed = false, attached = false;
+  const db = {
+    prepare(sql) {
+      return {
+        bind(...args) {
+          return {
+            first: async () => {
+              if (sql.includes("SELECT is_blocked")) return {is_blocked:0};
+              if (sql.includes("SELECT count FROM rate_limits")) return {count:1};
+              if (sql.includes("SELECT * FROM upload_sessions")) return session;
+              if (sql.includes("SELECT id FROM apps")) return {id:5};
+              if (sql.includes("SELECT screenshots_json")) return {screenshots_json:"[]"};
+              if (sql.includes("COALESCE(SUM(size_bytes)")) return {n:0};
+              return null;
+            },
+            all: async () => {
+              if (sql.includes("SELECT part_number,etag,size_bytes FROM upload_parts")) return {results:partRows};
+              return {results:[]};
+            },
+            run: async () => {
+              if (sql.includes("INSERT INTO upload_sessions")) {
+                session={id:args[0],owner_id:args[1],app_id:args[2],object_key:args[3],r2_upload_id:args[4],metadata_json:args[5],expected_size:args[6],client_sha256:args[7],expires_at:args[8],status:"open"};
+              }
+              if (sql.includes("INSERT INTO upload_parts")) partRows=[{part_number:args[1],etag:args[2],size_bytes:args[3]}];
+              if (sql.includes("UPDATE apps SET icon_key")) attached=true;
+              if (sql.includes("UPDATE upload_sessions SET status='completed'")) session.status="completed";
+              return {meta:{changes:1,last_row_id:5}};
+            }
+          };
+        },
+        first:async()=>null,all:async()=>({results:[]}),run:async()=>({meta:{changes:1,last_row_id:5}})
+      };
+    }
+  };
+  const files = {
+    createMultipartUpload: async () => ({uploadId:"mock-r2-upload"}),
+    resumeMultipartUpload: () => ({
+      uploadPart: async (_number,body) => {
+        const reader=body.getReader(),chunks=[];
+        while(true){const item=await reader.read();if(item.done)break;chunks.push(...item.value);}
+        uploaded=Uint8Array.from(chunks);
+        return {etag:"mock-etag"};
+      },
+      complete: async () => {completed=true;},
+      abort: async () => {}
+    }),
+    get: async (_key,options) => {
+      const bytes=options?.range?png.slice(0,options.range.length):png;
+      return {size:png.length,body:new ReadableStream({start(c){c.enqueue(bytes);c.close();}}),arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)};
+    },
+    delete:async()=>{}
+  };
+  const environment={...env(),DB:db,FILES:files};
+  const create=await call("/admin/uploads",{method:"POST",initData:signedInitData(42),environment,body:{
+    kind:"icon",filename:"icon.png",size_bytes:png.length,content_type:"image/png",app_id:5
+  }});
+  assert.equal(create.status,201);
+  const uploadId=(await create.json()).upload_id;
+  const part=await call("/admin/uploads/"+uploadId+"/parts?part_number=1",{
+    method:"PUT",initData:signedInitData(42),environment,body:png,
+    headers:{"Content-Length":String(png.length)}
+  });
+  assert.equal(part.status,200);
+  assert.deepEqual(uploaded,png);
+  const finish=await call("/admin/uploads/"+uploadId+"/complete",{
+    method:"POST",initData:signedInitData(42),environment,body:{}
+  });
+  assert.equal(finish.status,200);
+  assert.equal(completed,false,"completed R2 object is already present in this test fixture");
+  assert.equal(attached,true);
+  assert.equal(session.status,"completed");
+});
+
+test("multipart upload cannot be accessed by a different Telegram owner", async () => {
+  const customEnv={
+    ...env(),
+    DB:{
+      prepare(sql){return{bind(){return{
+        first:async()=>sql.includes("SELECT is_blocked")?{is_blocked:0}:sql.includes("SELECT count FROM rate_limits")?{count:1}:sql.includes("SELECT * FROM upload_sessions")?null:null,
+        all:async()=>({results:[]}),run:async()=>({meta:{changes:1}})
+      };},first:async()=>null,all:async()=>({results:[]}),run:async()=>({meta:{changes:1}})};}
+    }
+  };
+  const response=await call("/admin/uploads/another-users-upload/parts?part_number=1",{
+    method:"PUT",initData:signedInitData(42),environment:customEnv,body:new Uint8Array([1]),
+    headers:{"Content-Length":"1"}
+  });
+  assert.equal(response.status,404);
+});

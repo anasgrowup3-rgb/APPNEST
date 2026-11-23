@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHmac, createHash } from "node:crypto";
 import worker, { sha256Readable } from "../src/index.js";
 
 const TOKEN = "123456:TEST_TOKEN_FOR_UNIT_TESTS_ONLY";
@@ -91,5 +91,5 @@ test("streaming SHA-256 matches known digest across arbitrary chunks", async () 
 test("streaming SHA-256 handles multi-block payloads", async () => {
   const bytes = new TextEncoder().encode("APPNEST ".repeat(1000));
   const stream = new ReadableStream({ start(controller) { for(let i=0;i<bytes.length;i+=73) controller.enqueue(bytes.slice(i,i+73)); controller.close(); } });
-  assert.equal(await sha256Readable(stream), createHmac("sha256", "").update(bytes).digest("hex") === "unused" ? "" : (await import("node:crypto")).createHash("sha256").update(bytes).digest("hex"));
+  assert.equal(await sha256Readable(stream), createHash("sha256").update(bytes).digest("hex"));
 });

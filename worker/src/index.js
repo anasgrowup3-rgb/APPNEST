@@ -227,9 +227,9 @@ async function handle(request, env) {
     const ad=await env.DB.prepare("SELECT id FROM ad_campaigns WHERE id=? AND active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now')").bind(id).first();
     if(!ad) return fail("Реклама не найдена",404);
     if(action==="impression"){
+      await env.DB.prepare("INSERT INTO ad_frequency(user_id,ad_id,day,impressions) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET impressions=impressions+1 WHERE impressions<3").bind(userId,id,today).run();
       const row=await env.DB.prepare("SELECT impressions FROM ad_frequency WHERE user_id=? AND ad_id=? AND day=?").bind(userId,id,today).first();
-      if((row?.impressions||0)>=3) return json({success:true,limited:true});
-      await env.DB.prepare("INSERT INTO ad_frequency(user_id,ad_id,day,impressions) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET impressions=impressions+1").bind(userId,id,today).run();
+      if((row?.impressions||0)>3) return json({success:true,limited:true});
       await env.DB.prepare("UPDATE ad_campaigns SET impressions=impressions+1 WHERE id=?").bind(id).run();
     }else{
       await env.DB.prepare("INSERT INTO ad_frequency(user_id,ad_id,day,clicks) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET clicks=clicks+1").bind(userId,id,today).run();
@@ -434,7 +434,7 @@ async function handle(request, env) {
     }
     if (path === "/admin/ads" && method === "POST") {
       const b=await readJson(request); const title=clean(b.title,120),kind=clean(b.kind,40),creative=clean(b.creative_url,1000),target=clean(b.target_url,1000),starts=clean(b.starts_at,40),ends=clean(b.ends_at,40);
-      if(!title||!["banner","channel","task"].includes(kind)||!/^https:\/\//.test(target)||!starts||!ends||new Date(starts)>=new Date(ends)) return fail("Некорректные параметры кампании");
+      if(!title||!["banner","channel","task"].includes(kind)||!validHttpUrl(target)||(creative&&!validHttpUrl(creative))||!starts||!ends||new Date(starts)>=new Date(ends)) return fail("Некорректные параметры кампании");
       await env.DB.prepare("INSERT INTO ad_campaigns(title,kind,creative_url,target_url,starts_at,ends_at,active,priority) VALUES(?,?,?,?,?,?,?,?)").bind(title,kind,creative,target,starts,ends,b.active===false?0:1,Number(b.priority)||0).run(); await audit(env,userId,"ad.create",title); return json({success:true},201);
     }
     if (path.startsWith("/admin/users/") && method === "PATCH") {

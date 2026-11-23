@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, createHash } from "node:crypto";
-import worker, { sha256Readable } from "../src/index.js";
+import worker, { sha256Readable, cleanupExpired } from "../src/index.js";
 
 const TOKEN = "123456:TEST_TOKEN_FOR_UNIT_TESTS_ONLY";
 class MockDB {
@@ -207,4 +207,24 @@ test("Telegram membership API outage fails closed even in any-channel mode", asy
     assert.equal(data.subscription_required,true);
     assert.equal(data.mode,"unavailable");
   }finally{globalThis.fetch=originalFetch;}
+});
+
+test("scheduled cleanup aborts expired R2 multipart sessions and batches retention cleanup", async () => {
+  let aborted=false,batchCount=0;
+  const customEnv={
+    DB:{
+      prepare(sql){return{
+        bind(){return{
+          all:async()=>({results:sql.includes("FROM upload_sessions WHERE status='open'")?[{id:"expired-1",object_key:"apk/expired.apk",r2_upload_id:"r2-expired"}]:[]}),
+          run:async()=>({meta:{changes:1}})
+        };},
+        all:async()=>({results:[]}),run:async()=>({meta:{changes:1}})
+      };},
+      batch:async statements=>{batchCount=statements.length;return[];}
+    },
+    FILES:{resumeMultipartUpload(){return{abort:async()=>{aborted=true;}};}}
+  };
+  await cleanupExpired(customEnv);
+  assert.equal(aborted,true);
+  assert.equal(batchCount,4);
 });

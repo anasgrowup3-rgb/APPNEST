@@ -164,6 +164,21 @@ async function handle(request, env) {
     const { results = [] } = await env.DB.prepare(sql).bind(...args).all();
     return json({ success: true, apps: results.map(a => ({ ...a, size: a.size_bytes ? (a.size_bytes / 1048576).toFixed(1) + " MB" : null, icon_url: a.icon_key ? "/api/media/" + encodeURIComponent(a.icon_key) : null, banner_url: a.banner_key ? "/api/media/" + encodeURIComponent(a.banner_key) : null, screenshots: safeArray(a.screenshots_json).map(key=>"/api/media/"+encodeURIComponent(key)) })) });
   }
+  if (path.startsWith("/download/") && method === "GET") {
+    const token=path.split("/")[2];
+    if(!/^[a-f0-9]{64}$/.test(token)||!env.FILES) return fail("Ссылка на скачивание недействительна",404);
+    const tokenHash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(token)));
+    const ticket=await env.DB.prepare("SELECT user_id,app_id FROM download_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at>?").bind(tokenHash,Math.floor(Date.now()/1000)).first();
+    if(!ticket) return fail("Ссылка истекла или уже использована",410);
+    const consumed=await env.DB.prepare("UPDATE download_tokens SET used_at=datetime('now') WHERE token_hash=? AND used_at IS NULL AND expires_at>?").bind(tokenHash,Math.floor(Date.now()/1000)).run();
+    if(!consumed.meta?.changes) return fail("Ссылка уже использована",410);
+    const app=await env.DB.prepare("SELECT id,apk_key FROM apps WHERE id=? AND status='published'").bind(ticket.app_id).first();
+    if(!app) return fail("Приложение не найдено",404);
+    const object=await env.FILES.get(app.apk_key);
+    if(!object) return fail("APK-файл временно недоступен",404);
+    await logDownload(env,ticket.user_id,ticket.app_id);
+    return new Response(object.body,{headers:{"content-type":"application/vnd.android.package-archive","content-disposition":`attachment; filename="app-${app.id}.apk"`,"content-length":String(object.size),"x-content-type-options":"nosniff","cache-control":"private, no-store","etag":object.httpEtag||""}});
+  }
   if (path.startsWith("/media/") && method === "GET") {
     if (!env.FILES) return fail("R2 binding FILES не настроен", 503);
     const key = decodeURIComponent(path.slice(7));
@@ -199,6 +214,16 @@ async function handle(request, env) {
     if (method === "DELETE") { await env.DB.prepare("DELETE FROM favorites WHERE user_id=? AND app_id=?").bind(userId,appId).run(); return json({success:true}); }
   }
   if (path.startsWith("/apps/") && path.endsWith("/versions") && method === "GET") { const id=Number(path.split("/")[2]); const {results=[]}=await env.DB.prepare("SELECT version,version_code,min_android,size_bytes,release_notes,created_at FROM app_versions WHERE app_id=? ORDER BY version_code DESC LIMIT 30").bind(id).all(); return json({success:true,versions:results}); }
+  if (path.startsWith("/apps/") && path.endsWith("/download-ticket") && method === "POST") {
+    const appId=Number(path.split("/")[2]);
+    const app=await env.DB.prepare("SELECT id FROM apps WHERE id=? AND status='published'").bind(appId).first();
+    if(!app) return fail("Приложение не найдено",404);
+    const subs=await subscriptionCheck(env,userId);
+    if(!subs.allowed) return json({success:false,error:subs.unavailable?"Не удалось проверить подписки. Повторите попытку позже.":"Для скачивания необходимо подписаться на каналы",subscription_required:true,mode:subs.unavailable?"unavailable":"required",channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed}))},403);
+    const bytes=crypto.getRandomValues(new Uint8Array(32)),token=hex(bytes),hash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(token))),expiry=Math.floor(Date.now()/1000)+60;
+    await env.DB.prepare("INSERT INTO download_tokens(token_hash,user_id,app_id,expires_at) VALUES(?,?,?,?)").bind(hash,userId,appId,expiry).run();
+    return json({success:true,url:"/api/download/"+token,expires_at:expiry});
+  }
   if (path.startsWith("/apps/") && path.endsWith("/download") && method === "POST") {
     const appId = Number(path.split("/")[2]);
     const app = await env.DB.prepare("SELECT id,apk_key,apk_sha256,title FROM apps WHERE id=? AND status='published'").bind(appId).first();

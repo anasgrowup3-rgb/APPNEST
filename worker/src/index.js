@@ -538,9 +538,30 @@ async function handle(request, env) {
   }
   return fail("Endpoint not found",404);
 }
+async function cleanupExpired(env) {
+  if(!env.DB) return;
+  const now=Math.floor(Date.now()/1000);
+  const {results=[]}=await env.DB.prepare("SELECT id,object_key,r2_upload_id FROM upload_sessions WHERE status='open' AND expires_at<=? LIMIT 100").bind(now).all();
+  for(const session of results){
+    if(env.FILES){
+      try{await env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id).abort();}
+      catch(error){console.warn("Expired multipart cleanup:",error?.message||"abort failed");}
+    }
+    await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=? AND status='open'").bind(session.id).run();
+  }
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM download_tokens WHERE expires_at<? OR used_at IS NOT NULL").bind(now),
+    env.DB.prepare("DELETE FROM rate_limits WHERE expires_at<?").bind(now),
+    env.DB.prepare("DELETE FROM ad_frequency WHERE day<date('now','-90 days')"),
+    env.DB.prepare("DELETE FROM upload_sessions WHERE status IN ('completed','aborted','failed') AND created_at<datetime('now','-30 days')")
+  ]);
+}
 function safeArray(value) { try { const x=JSON.parse(value||"[]"); return Array.isArray(x)?x:[]; } catch { return []; } }
-export { sha256Readable };
+export { sha256Readable, cleanupExpired };
 export default {
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(cleanupExpired(env));
+  },
   async fetch(request, env) {
     const origin = request.headers.get("Origin");
     const allowed = clean(env.ALLOWED_ORIGIN, 500);

@@ -243,7 +243,7 @@ def help_command(message):
             "/stats — статистика каталога\n"
             "/cancel — отменить действие\n"
             "/id — узнать свой ID\n"
-            "/open — открыть Mini App\\n"
+            "/open — открыть Mini App\n"
             "/help — помощь"
         )
     else:

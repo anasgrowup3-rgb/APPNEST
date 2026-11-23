@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const API = "https://appnest-api.anas-grow-up-3.workers.dev/api";
+  const API = (document.querySelector('meta[name="appnest-api-base"]')?.content || "https://appnest-api.anas-grow-up-3.workers.dev/api").replace(/\/+$/, "");
   const PAGE_SIZE = 12;
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -36,6 +36,8 @@
     if(bar) bar.value=total?Math.min(100,Math.round(done/total*100)):0;
     if(status) status.textContent=label+" · "+(total?Math.round(done/total*100):0)+"%";
   }
+  const uploadSessionCache = new WeakMap();
+
   function sendUploadPart(uploadId,partNumber,bytes,onProgress) {
     return new Promise((resolve,reject)=>{
       const xhr=new XMLHttpRequest();
@@ -43,42 +45,67 @@
       xhr.setRequestHeader("X-Telegram-Init-Data",initData);
       xhr.setRequestHeader("Content-Type","application/octet-stream");
       xhr.upload.onprogress=e=>{if(e.lengthComputable) onProgress(e.loaded,e.total);};
-      xhr.onload=()=>{let data={};try{data=JSON.parse(xhr.responseText);}catch{} if(xhr.status>=200&&xhr.status<300)resolve(data);else reject(new Error(data.error||"Ошибка части "+partNumber));};
+      xhr.onload=()=>{
+        let data={};try{data=JSON.parse(xhr.responseText);}catch{}
+        if(xhr.status>=200&&xhr.status<300) resolve(data);
+        else {const error=new Error(data.error||"Ошибка части "+partNumber);error.status=xhr.status;reject(error);}
+      };
       xhr.onerror=()=>reject(new Error("Сетевая ошибка при загрузке части "+partNumber));
       xhr.onabort=()=>reject(new Error("Загрузка отменена"));
       xhr.send(bytes);
     });
   }
+
   async function uploadFileMultipart(file,kind,extra={},onProgress=()=>{}) {
-    const init=await request("/admin/uploads",{method:"POST",body:JSON.stringify({
-      kind,filename:file.name,size_bytes:file.size,content_type:file.type||"application/octet-stream",
-      ...extra
-    })});
-    const chunkSize=init.part_size||8388608, count=Math.ceil(file.size/chunkSize);
-    let sent=0;
+    let sessions=uploadSessionCache.get(file);
+    if(!sessions){sessions=new Map();uploadSessionCache.set(file,sessions);}
+    const cacheKey=kind+":"+JSON.stringify(Object.entries(extra).sort(([a],[b])=>a.localeCompare(b)));
+    let session=sessions.get(cacheKey);
+    if(!session){
+      const init=await request("/admin/uploads",{method:"POST",body:JSON.stringify({
+        kind,filename:file.name,size_bytes:file.size,content_type:file.type||"application/octet-stream",
+        ...extra
+      })});
+      session={uploadId:init.upload_id,partSize:init.part_size||8388608,completedParts:new Set()};
+      sessions.set(cacheKey,session);
+    }
+    const count=Math.ceil(file.size/session.partSize);
+    let sent=[...session.completedParts].reduce((total,part)=>total+Math.min(session.partSize,file.size-(part-1)*session.partSize),0);
+    onProgress(sent,file.size);
     try {
       for(let part=1;part<=count;part++){
-        const chunk=file.slice((part-1)*chunkSize,Math.min(part*chunkSize,file.size));
+        if(session.completedParts.has(part)) continue;
+        const chunk=file.slice((part-1)*session.partSize,Math.min(part*session.partSize,file.size));
         let done=false,error;
         for(let attempt=0;attempt<3&&!done;attempt++){
           try {
-            await sendUploadPart(init.upload_id,part,chunk,(loaded)=>{
-              const current=sent+Math.min(loaded,chunk.size);
-              onProgress(current,file.size);
+            await sendUploadPart(session.uploadId,part,chunk,loaded=>{
+              onProgress(sent+Math.min(loaded,chunk.size),file.size);
             });
-            done=true;sent+=chunk.size;onProgress(sent,file.size);
-          } catch(e){error=e;if(attempt<2) await new Promise(r=>setTimeout(r,500*(attempt+1)));}
+            done=true;
+            session.completedParts.add(part);
+            sent+=chunk.size;
+            onProgress(sent,file.size);
+          } catch(e) {
+            error=e;
+            if(e.status===404||e.status===410) {
+              sessions.delete(cacheKey);
+              throw new Error("Сессия загрузки истекла. Повторите выбор файла для новой загрузки.");
+            }
+            if(attempt<2) await new Promise(r=>setTimeout(r,500*(attempt+1)));
+          }
         }
         if(!done) throw error||new Error("Не удалось загрузить часть "+part);
       }
-      const completed=await request("/admin/uploads/"+encodeURIComponent(init.upload_id)+"/complete",{method:"POST",body:JSON.stringify({})});
+      const completed=await request("/admin/uploads/"+encodeURIComponent(session.uploadId)+"/complete",{method:"POST",body:JSON.stringify({})});
+      sessions.delete(cacheKey);
       return completed;
     } catch(error) {
-      await request("/admin/uploads/"+encodeURIComponent(init.upload_id),{method:"DELETE"}).catch(()=>{});
+      // Keep the open R2 session and acknowledged parts so the same File can resume on retry.
+      // The Worker expires abandoned sessions and aborts their multipart uploads automatically.
       throw error;
     }
   }
-
   async function request(path, options = {}) {
     const response = await fetch(API + path, {
       ...options,

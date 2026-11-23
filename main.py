@@ -701,19 +701,20 @@ def handle_text(message):
     app = get_app(text)
 
     if app:
-        code, title, description, file_id = app
-
-        try:
-            bot.send_document(
-                message.chat.id,
-                file_id,
-                caption=f"📱 {title}\n\n{description}"
-            )
-        except Exception as error:
-            print("SEND ERROR:", error)
+        code, title, description, _file_id = app
+        # Legacy SQLite file_id delivery bypasses D1 channel-subscription enforcement.
+        # All end-user APK downloads must go through the authenticated Mini App Worker.
+        if WEBAPP_URL.startswith("https://"):
             bot.reply_to(
                 message,
-                "❌ Не удалось отправить файл. Попробуй позже."
+                f"📱 {title}\n\n{description}\n\n"
+                "Барномаро дар APPNEST кушоед. Пеш аз боргирӣ санҷиши обуна ба каналҳо иҷро мешавад.",
+                reply_markup=webapp_keyboard()
+            )
+        else:
+            bot.reply_to(
+                message,
+                "Зеркашӣ танҳо тавассути APPNEST дастрас аст. Mini App ҳоло танзим нашудааст."
             )
     else:
         bot.reply_to(

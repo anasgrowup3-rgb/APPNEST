@@ -289,7 +289,7 @@ test("multipart image upload streams a part, completes, and attaches media using
               if (sql.includes("SELECT is_blocked")) return {is_blocked:0};
               if (sql.includes("SELECT count FROM rate_limits")) return {count:1};
               if (sql.includes("SELECT * FROM upload_sessions")) return session;
-              if (sql.includes("SELECT id FROM apps")) return {id:5};
+              if (sql.includes("SELECT id FROM apps") || sql.includes("SELECT id,version_code FROM apps")) return {id:5,version_code:1};
               if (sql.includes("SELECT screenshots_json")) return {screenshots_json:"[]"};
               if (sql.includes("COALESCE(SUM(size_bytes)")) return {n:0};
               return null;

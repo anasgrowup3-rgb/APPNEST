@@ -98,6 +98,22 @@ async function logDownload(env, userId, appId) {
   await env.DB.prepare("INSERT INTO downloads (user_id, app_id) VALUES (?, ?)").bind(userId, appId).run();
   await env.DB.prepare("UPDATE apps SET downloads=downloads+1 WHERE id=?").bind(appId).run();
 }
+
+function safeJson(value, fallback = {}) { try { return JSON.parse(value || ""); } catch { return fallback; } }
+function validHttpUrl(value) { try { const u=new URL(value); return u.protocol==="https:" && !u.username && !u.password; } catch { return false; } }
+async function adminSession(request, env) { const a=await adminAuth(request,env); return a.error ? null : a; }
+async function createMultipart(env,key,type) {
+  return await env.FILES.createMultipartUpload(key,{httpMetadata:{contentType:type}});
+}
+async function uploadOwner(env,id,userId) {
+  return await env.DB.prepare("SELECT * FROM upload_sessions WHERE id=? AND owner_id=? AND status='open' AND expires_at>?").bind(id,userId,Math.floor(Date.now()/1000)).first();
+}
+async function mediaObject(env,key) {
+  const row=await env.DB.prepare("SELECT id FROM apps WHERE status='published' AND (icon_key=? OR banner_key=? OR instr(screenshots_json, ?) > 0)").bind(key,key,key).first();
+  if(!row) return null;
+  return await env.FILES.get(key);
+}
+
 async function handle(request, env) {
   if (!env.DB) return fail("D1 binding DB не настроен", 503);
   const url = new URL(request.url);
@@ -119,9 +135,8 @@ async function handle(request, env) {
   if (path.startsWith("/media/") && method === "GET") {
     if (!env.FILES) return fail("R2 binding FILES не настроен", 503);
     const key = decodeURIComponent(path.slice(7));
-    const row = await env.DB.prepare("SELECT id FROM apps WHERE status='published' AND (icon_key=? OR banner_key=? OR instr(screenshots_json, ?) > 0)").bind(key,key,key).first();
-    if (!row) return fail("Файл не найден", 404);
-    const object = await env.FILES.get(key);
+    const object = await mediaObject(env,key);
+    if (!object) return fail("Файл не найден", 404);
     if (!object) return fail("Файл не найден", 404);
     return new Response(object.body, { headers: { "content-type": object.httpMetadata?.contentType || "application/octet-stream", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
   }
@@ -163,18 +178,162 @@ async function handle(request, env) {
     await env.DB.prepare("INSERT INTO feedback(user_id,message) VALUES (?,?)").bind(userId,message).run();
     return json({success:true},201);
   }
-  if (path.startsWith("/ads/") && path.endsWith("/impression") && method === "POST") {
-    const id=Number(path.split("/")[2]); await env.DB.prepare("UPDATE ad_campaigns SET impressions=impressions+1 WHERE id=? AND active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now')").bind(id).run(); return json({success:true});
-  }
-  if (path.startsWith("/ads/") && path.endsWith("/click") && method === "POST") {
-    const id=Number(path.split("/")[2]); await env.DB.prepare("UPDATE ad_campaigns SET clicks=clicks+1 WHERE id=? AND active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now')").bind(id).run(); return json({success:true});
-  }
   if (path === "/ads" && method === "GET") {
-    const {results=[]}=await env.DB.prepare("SELECT id,title,kind,creative_url,target_url FROM ad_campaigns WHERE active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now') ORDER BY priority DESC LIMIT 5").all(); return json({success:true,ads:results});
+    const {results=[]}=await env.DB.prepare("SELECT id,title,kind,creative_url,target_url FROM ad_campaigns WHERE active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now') ORDER BY priority DESC LIMIT 5").all();
+    const today=new Date().toISOString().slice(0,10),shown=[];
+    for(const ad of results){const cap=await env.DB.prepare("SELECT impressions FROM ad_frequency WHERE user_id=? AND ad_id=? AND day=?").bind(userId,ad.id,today).first();if((cap?.impressions||0)<3)shown.push(ad);}
+    return json({success:true,ads:shown});
+  }
+  if (path.startsWith("/ads/") && method === "POST" && /\/(impression|click)$/.test(path)) {
+    const bits=path.split("/"),id=Number(bits[2]),action=bits[3],today=new Date().toISOString().slice(0,10);
+    const ad=await env.DB.prepare("SELECT id FROM ad_campaigns WHERE id=? AND active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now')").bind(id).first();
+    if(!ad) return fail("Реклама не найдена",404);
+    if(action==="impression"){
+      const row=await env.DB.prepare("SELECT impressions FROM ad_frequency WHERE user_id=? AND ad_id=? AND day=?").bind(userId,id,today).first();
+      if((row?.impressions||0)>=3) return json({success:true,limited:true});
+      await env.DB.prepare("INSERT INTO ad_frequency(user_id,ad_id,day,impressions) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET impressions=impressions+1").bind(userId,id,today).run();
+      await env.DB.prepare("UPDATE ad_campaigns SET impressions=impressions+1 WHERE id=?").bind(id).run();
+    }else{
+      await env.DB.prepare("INSERT INTO ad_frequency(user_id,ad_id,day,clicks) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET clicks=clicks+1").bind(userId,id,today).run();
+      await env.DB.prepare("UPDATE ad_campaigns SET clicks=clicks+1 WHERE id=?").bind(id).run();
+    }
+    return json({success:true});
   }
   if (path === "/subscription/status" && method === "GET") return json({success:true,...await subscriptionCheck(env,userId)});
   if (path.startsWith("/admin/")) {
     const admin = await adminAuth(request,env); if(admin.error) return admin.error;
+
+    if (path === "/admin/categories" && method === "GET") {
+      const {results=[]}=await env.DB.prepare("SELECT id,slug,title,icon,sort_order FROM categories ORDER BY sort_order,title").all();
+      return json({success:true,categories:results});
+    }
+    if (path === "/admin/categories" && method === "POST") {
+      const b=await readJson(request), slug=clean(b.slug,60).toLowerCase().replace(/[^a-z0-9_-]/g,"-"),title=clean(b.title,100),icon=clean(b.icon,20);
+      if(!slug||!title) return fail("Укажите slug и название категории");
+      await env.DB.prepare("INSERT INTO categories(slug,title,icon,sort_order) VALUES(?,?,?,?)").bind(slug,title,icon,Number(b.sort_order)||0).run();
+      await audit(env,userId,"category.create",slug); return json({success:true},201);
+    }
+    if (path.startsWith("/admin/categories/") && method === "PATCH") {
+      const id=Number(path.split("/")[3]), b=await readJson(request);
+      if(!Number.isSafeInteger(id)||id<1) return fail("Некорректная категория");
+      const title=clean(b.title,100),icon=clean(b.icon,20),order=Number(b.sort_order);
+      if(!title) return fail("Укажите название");
+      await env.DB.prepare("UPDATE categories SET title=?,icon=?,sort_order=? WHERE id=?").bind(title,icon,Number.isFinite(order)?order:0,id).run();
+      await audit(env,userId,"category.update",String(id)); return json({success:true});
+    }
+    if (path.startsWith("/admin/categories/") && method === "DELETE") {
+      const id=Number(path.split("/")[3]);
+      const used=await env.DB.prepare("SELECT COUNT(*) n FROM apps WHERE category=(SELECT slug FROM categories WHERE id=?)").bind(id).first();
+      if(used?.n) return fail("Категория используется приложениями",409);
+      await env.DB.prepare("DELETE FROM categories WHERE id=?").bind(id).run(); await audit(env,userId,"category.delete",String(id)); return json({success:true});
+    }
+    if (path === "/admin/uploads" && method === "POST") {
+      if(!env.FILES) return fail("R2 binding FILES не настроен",503);
+      const b=await readJson(request),kind=clean(b.kind,20),size=Number(b.size_bytes),name=clean(b.filename,160),mime=clean(b.content_type,100);
+      const appId=b.app_id==null?null:Number(b.app_id);
+      const isApk=kind==="apk",isImage=["icon","banner","screenshot"].includes(kind);
+      if((!isApk&&!isImage)||!Number.isSafeInteger(size)||size<(isApk?8:1)||size>Number(isApk?(env.MAX_APK_BYTES||2147483648):10485760)) return fail("Недопустимый тип или размер файла",413);
+      if(isApk&&!name.toLowerCase().endsWith(".apk")) return fail("Требуется APK-файл");
+      if(isImage&&!["image/png","image/jpeg","image/webp"].includes(mime)) return fail("Поддерживаются только PNG, JPEG и WebP");
+      const meta={kind,filename:name,content_type:isApk?"application/vnd.android.package-archive":mime,app_id:appId,version:clean(b.version,40),version_code:Number(b.version_code)||0,min_android:clean(b.min_android,40),release_notes:clean(b.release_notes,2000),metadata:b.metadata||{}};
+      if(isApk && (!meta.version || !Number.isSafeInteger(meta.version_code) || meta.version_code<1)) return fail("Укажите версию и version_code");
+      if(isImage && size>10*1024*1024) return fail("Изображение превышает 10 МБ",413);
+      if(appId && !(await env.DB.prepare("SELECT id FROM apps WHERE id=?").bind(appId).first())) return fail("Приложение не найдено",404);
+      const key=(isApk?"apk/":"media/")+crypto.randomUUID()+(isApk?".apk":mime==="image/png"?".png":mime==="image/webp"?".webp":".jpg");
+      const mp=await createMultipart(env,key,meta.content_type),id=crypto.randomUUID(),expiry=Math.floor(Date.now()/1000)+86400;
+      await env.DB.prepare("INSERT INTO upload_sessions(id,owner_id,app_id,object_key,r2_upload_id,metadata_json,expected_size,client_sha256,expires_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(id,userId,appId,key,mp.uploadId,JSON.stringify(meta),size,clean(b.sha256,64).toLowerCase(),expiry).run();
+      return json({success:true,upload_id:id,object_key:key,part_size:8388608,expires_at:expiry},201);
+    }
+    if (path.startsWith("/admin/uploads/") && path.endsWith("/parts") && method === "PUT") {
+      if(!env.FILES) return fail("R2 binding FILES не настроен",503);
+      const bits=path.split("/"),id=bits[3],part=Number(url.searchParams.get("part_number"));
+      const session=await uploadOwner(env,id,userId);
+      if(!session) return fail("Загрузка не найдена или истекла",404);
+      if(!Number.isSafeInteger(part)||part<1||part>10000) return fail("Некорректный номер части");
+      const length=Number(request.headers.get("content-length")||0);
+      if(!length||length>8388608) return fail("Часть должна быть от 1 до 8 МиБ",413);
+      const current=await env.DB.prepare("SELECT COALESCE(SUM(size_bytes),0) n FROM upload_parts WHERE upload_id=? AND part_number<>?").bind(id,part).first();
+      if((current?.n||0)+length>session.expected_size) return fail("Части превышают заявленный размер",413);
+      const upload=env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id);
+      const result=await upload.uploadPart(part,request.body);
+      await env.DB.prepare("INSERT INTO upload_parts(upload_id,part_number,etag,size_bytes) VALUES(?,?,?,?) ON CONFLICT(upload_id,part_number) DO UPDATE SET etag=excluded.etag,size_bytes=excluded.size_bytes").bind(id,part,result.etag,length).run();
+      return json({success:true,part_number:part,etag:result.etag,size_bytes:length});
+    }
+    if (path.startsWith("/admin/uploads/") && path.endsWith("/complete") && method === "POST") {
+      if(!env.FILES) return fail("R2 binding FILES не настроен",503);
+      const id=path.split("/")[3],session=await uploadOwner(env,id,userId);
+      if(!session) return fail("Загрузка не найдена или истекла",404);
+      const meta=safeJson(session.metadata_json),{results:parts=[]}=await env.DB.prepare("SELECT part_number,etag,size_bytes FROM upload_parts WHERE upload_id=? ORDER BY part_number").bind(id).all();
+      const total=parts.reduce((n,p)=>n+p.size_bytes,0);
+      if(!parts.length||total!==session.expected_size||parts.some((p,i)=>p.part_number!==i+1)) return fail("Не все части загружены или размер не совпадает",409);
+      const first=await env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id);
+      const head=await first.uploadPart; // no object is committed before R2 validates the multipart manifest
+      const upload=env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id);
+      const object=await upload.complete(parts.map(p=>({partNumber:p.part_number,etag:p.etag})));
+      const stored=await env.FILES.get(session.object_key,{range:{offset:0,length:4}});
+      if(meta.kind==="apk"){
+        const sig=new Uint8Array(await stored.arrayBuffer());
+        if(sig[0]!==0x50||sig[1]!==0x4b){ await env.FILES.delete(session.object_key); await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run(); return fail("Файл не имеет ZIP-сигнатуру"); }
+        const sha=clean(session.client_sha256,64);
+        if(!/^[a-f0-9]{64}$/.test(sha)){ await env.FILES.delete(session.object_key); await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run(); return fail("Не передан SHA-256 файла"); }
+        if(session.app_id){
+          const app=await env.DB.prepare("SELECT id,apk_key FROM apps WHERE id=?").bind(session.app_id).first();
+          await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
+          await env.DB.prepare("UPDATE apps SET version=?,version_code=?,min_android=?,size_bytes=?,apk_key=?,apk_sha256=?,updated_at=datetime('now') WHERE id=?").bind(meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,session.app_id).run();
+        } else {
+          const data=meta.metadata||{},title=clean(data.title,100),description=clean(data.description,5000),developer=clean(data.developer,120),category=clean(data.category,80);
+          if(!title||!description||!category){ await env.FILES.delete(session.object_key); return fail("Для нового приложения нужны title, description и category"); }
+          const ins=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,version_code,min_android,size_bytes,apk_key,apk_sha256,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,"draft",userId).run();
+          session.app_id=ins.meta.last_row_id;
+        }
+      } else {
+        if(!session.app_id) { await env.FILES.delete(session.object_key); return fail("Для медиафайла нужен app_id"); }
+        const column=meta.kind==="icon"?"icon_key":meta.kind==="banner"?"banner_key":null;
+        if(column) await env.DB.prepare("UPDATE apps SET "+column+"=?,updated_at=datetime('now') WHERE id=?").bind(session.object_key,session.app_id).run();
+        else {
+          const row=await env.DB.prepare("SELECT screenshots_json FROM apps WHERE id=?").bind(session.app_id).first();
+          const list=safeArray(row?.screenshots_json); list.push(session.object_key);
+          await env.DB.prepare("UPDATE apps SET screenshots_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify(list.slice(-10)),session.app_id).run();
+        }
+      }
+      await env.DB.prepare("UPDATE upload_sessions SET status='completed' WHERE id=?").bind(id).run();
+      await audit(env,userId,"upload.complete",id,meta.kind);
+      return json({success:true,app_id:session.app_id,object_key:session.object_key,sha256:session.client_sha256});
+    }
+    if (path.startsWith("/admin/uploads/") && method === "DELETE") {
+      const id=path.split("/")[3],session=await uploadOwner(env,id,userId);
+      if(!session) return fail("Загрузка не найдена",404);
+      await env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id).abort();
+      await env.DB.prepare("UPDATE upload_sessions SET status='aborted' WHERE id=?").bind(id).run();
+      return json({success:true});
+    }
+    if (path.startsWith("/admin/apps/") && path.endsWith("/versions") && method === "GET") {
+      const id=Number(path.split("/")[3]);
+      const {results=[]}=await env.DB.prepare("SELECT id,version,version_code,min_android,size_bytes,sha256,release_notes,created_at FROM app_versions WHERE app_id=? ORDER BY version_code DESC").bind(id).all();
+      return json({success:true,versions:results});
+    }
+    if (path.startsWith("/admin/channels/") && method === "PATCH") {
+      const id=Number(path.split("/")[3]),b=await readJson(request);
+      if(typeof b.enabled!=="boolean") return fail("enabled должен быть boolean");
+      await env.DB.prepare("UPDATE required_channels SET enabled=? WHERE id=?").bind(b.enabled?1:0,id).run(); await audit(env,userId,"channel.toggle",String(id)); return json({success:true});
+    }
+    if (path.startsWith("/admin/channels/") && method === "DELETE") {
+      const id=Number(path.split("/")[3]); await env.DB.prepare("DELETE FROM required_channels WHERE id=?").bind(id).run(); await audit(env,userId,"channel.delete",String(id)); return json({success:true});
+    }
+    if (path.startsWith("/admin/ads/") && method === "PATCH") {
+      const id=Number(path.split("/")[3]),b=await readJson(request);
+      if(typeof b.active!=="boolean") return fail("active должен быть boolean");
+      await env.DB.prepare("UPDATE ad_campaigns SET active=? WHERE id=?").bind(b.active?1:0,id).run(); await audit(env,userId,"ad.toggle",String(id)); return json({success:true});
+    }
+    if (path.startsWith("/admin/ads/") && method === "DELETE") {
+      const id=Number(path.split("/")[3]); await env.DB.prepare("DELETE FROM ad_campaigns WHERE id=?").bind(id).run(); await audit(env,userId,"ad.delete",String(id)); return json({success:true});
+    }
+    if (path.startsWith("/admin/feedback/") && method === "PATCH") {
+      const id=Number(path.split("/")[3]),b=await readJson(request);
+      if(!["open","resolved","rejected"].includes(b.status)) return fail("Недопустимый статус");
+      await env.DB.prepare("UPDATE feedback SET status=? WHERE id=?").bind(b.status,id).run(); await audit(env,userId,"feedback.update",String(id)); return json({success:true});
+    }
+
     if (path === "/admin/overview" && method === "GET") {
       const [apps,users,downloads,feedback,allApps,ads,channels] = await Promise.all([
         env.DB.prepare("SELECT COUNT(*) n FROM apps WHERE status='published'").first(),

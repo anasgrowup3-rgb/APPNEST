@@ -144,7 +144,7 @@ The script leaves all fixtures in the disposable database and bucket. After evid
 
 ### Real browser and Telegram WebView acceptance
 
-The repository Mini App currently has its production API base URL embedded in `miniapp/script.js`. Do not open the existing production Mini App and do not change the production Pages project for this test. For a separate manual UI test, create a separate Cloudflare Pages project from the same branch and configure a test-only copy of the Mini App to point to the integration Worker. Set the integration Worker `ALLOWED_ORIGIN` to that Pages preview origin. Open the preview in Android Chrome, then open the same preview URL through a Telegram bot Web App button. Verify the real `Telegram.WebApp.initData`, RU/TJ/EN switching, catalog, app details, subscription gate, download, favorites, profile, upload progress/retry, and admin screens. Do not use production APKs or production user accounts.
+The Mini App API endpoint is configured by the `meta[name="appnest-api-base"]` element in `miniapp/index.html`; the checked-in value remains the existing production endpoint. For an isolated preview, override only that meta value in a separate preview copy to `https://YOUR-INTEGRATION-WORKER.workers.dev/api`. Do not open the existing production Mini App and do not change the production Pages project for this test. Create a separate Cloudflare Pages project from this branch and set the integration Worker `ALLOWED_ORIGIN` to that Pages preview origin. Open the preview in Android Chrome, then open the same preview URL through a Telegram bot Web App button. Verify the real `Telegram.WebApp.initData`, RU/TJ/EN switching, catalog, app details, subscription gate, download, favorites, profile, upload progress/retry, and admin screens. Do not use production APKs or production user accounts.
 
 ### What this does not prove
 
@@ -152,3 +152,20 @@ The repository Mini App currently has its production API base URL embedded in `m
 - R2 bucket privacy must also be confirmed in Cloudflare Dashboard: public access disabled and no public custom domain. The HTTP checks prove that the Worker does not expose the APK through its media route and that downloads use one-time tickets.
 - A passing integration suite does not certify APK malware safety, Google Play compatibility, or installability.
 - Browser/Android WebView checks require a real Android device and the separate Pages preview.
+
+
+## Release checklist (must be completed before production)
+
+- [ ] Review the open PR diff and confirm the intended branch is `feat/appnest-stable-api`.
+- [ ] Run the GitHub Actions validation workflow; all syntax, Node Worker and Python/SQLite jobs must pass.
+- [ ] Apply D1 migrations to a disposable integration database first; inspect the migration history and verify existing rows remain intact before any production migration.
+- [ ] Run `node --env-file=../.env.integration test/real-integration.mjs` against the isolated Worker, private R2 bucket and disposable Telegram channels only.
+- [ ] Verify the integration Worker bindings are exactly `DB` and `FILES`; confirm the R2 bucket has public access disabled and no public custom domain.
+- [ ] Verify Telegram bot is an administrator in every required test channel and that live `getChatMember` returns the expected membership matrix.
+- [ ] Open the isolated Pages preview in Android Chrome and Telegram WebView; verify initData, navigation, media, upload retry, download ticket, subscription gate, and all three locales.
+- [ ] Check the deployed integration URL, allowed origin, bot identity and D1/R2 resource names before running any integration script. Never use production endpoints or secrets in the test harness.
+- [ ] Review security headers, CORS, rate limits, admin authorization, file signatures, SHA-256, single-use download tickets and logs for accidental secrets.
+- [ ] Confirm a backup and rollback plan for any eventual production D1 migration; keep additive migrations and retain previous Worker version for rollback.
+- [ ] Obtain explicit release authorization before production deployment or merge. This PR must remain Draft/open until that authorization is given.
+
+The real integration script is intentionally destructive only to the extent that it creates test fixtures and R2 objects in its configured target. It does not automatically delete them. Never run it unless the target is positively verified as the isolated `appnest-integration-api`, `appnest-integration-db`, and `appnest-integration-files`.

@@ -37,3 +37,13 @@ INSERT OR IGNORE INTO categories(slug,title,icon,sort_order) VALUES
 ('games','Игры','◈',2),
 ('tools','Инструменты','⌘',3),
 ('other','Другое','◇',4);
+
+CREATE TABLE IF NOT EXISTS download_tokens (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+  app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_download_tokens_expiry ON download_tokens(expires_at,used_at);

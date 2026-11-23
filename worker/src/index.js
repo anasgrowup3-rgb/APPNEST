@@ -307,6 +307,7 @@ async function handle(request, env) {
       await upload.complete(parts.map(p=>({partNumber:p.part_number,etag:p.etag})));
       const stored=await env.FILES.get(session.object_key);
       if(!stored){await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Объект не найден после завершения загрузки",500);}
+      let verifiedApkSha=null;
       if(meta.kind==="apk"){
         const signatureObject=await env.FILES.get(session.object_key,{range:{offset:0,length:4}});
         const sig=new Uint8Array(await signatureObject.arrayBuffer());
@@ -315,7 +316,7 @@ async function handle(request, env) {
         if(suppliedSha && !/^[a-f0-9]{64}$/.test(suppliedSha)){await env.FILES.delete(session.object_key);return fail("Некорректный SHA-256");}
         const actualSha=await sha256Readable(stored.body);
         if(suppliedSha && actualSha!==suppliedSha){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("SHA-256 не совпадает: файл повреждён или изменён",422);}
-        const sha=actualSha;
+        const sha=actualSha; verifiedApkSha=sha;
         if(session.app_id){
           const app=await env.DB.prepare("SELECT id,apk_key FROM apps WHERE id=?").bind(session.app_id).first();
           await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
@@ -346,7 +347,7 @@ async function handle(request, env) {
       }
       await env.DB.prepare("UPDATE upload_sessions SET status='completed' WHERE id=?").bind(id).run();
       await audit(env,userId,"upload.complete",id,meta.kind);
-      return json({success:true,app_id:session.app_id,object_key:session.object_key,sha256:session.client_sha256});
+      return json({success:true,app_id:session.app_id,object_key:session.object_key,sha256:verifiedApkSha});
     }
     if (path.startsWith("/admin/uploads/") && method === "DELETE") {
       const id=path.split("/")[3],session=await uploadOwner(env,id,userId);
@@ -402,7 +403,7 @@ async function handle(request, env) {
       const form=await request.formData(); const title=clean(form.get("title"),100), description=clean(form.get("description"),5000), developer=clean(form.get("developer"),120), category=clean(form.get("category"),80), version=clean(form.get("version"),40), minAndroid=clean(form.get("min_android"),40);
       const apk=form.get("apk"), icon=form.get("icon");
       if(!title || !description || !category || !(apk instanceof File) || apk.size<8 || !apk.name.toLowerCase().endsWith(".apk")) return fail("Укажите название, описание, категорию и корректный APK");
-      if(apk.size>Number(env.MAX_APK_BYTES || 1073741824)) return fail("APK превышает настроенный лимит",413);
+      if(apk.size>Number(env.MAX_DIRECT_APK_BYTES || 16777216)) return fail("Для файлов больше 16 МиБ используйте multipart-загрузку",413);
       const head=new Uint8Array(await apk.slice(0,4).arrayBuffer()); if(head[0]!==0x50 || head[1]!==0x4b) return fail("APK не имеет ZIP-сигнатуру");
       if(!env.FILES) return fail("R2 binding FILES не настроен",503);
       const bytes=await apk.arrayBuffer(); const digest=hex(await crypto.subtle.digest("SHA-256",bytes)); const key="apk/"+crypto.randomUUID()+".apk";
@@ -455,6 +456,7 @@ async function handle(request, env) {
   return fail("Endpoint not found",404);
 }
 function safeArray(value) { try { const x=JSON.parse(value||"[]"); return Array.isArray(x)?x:[]; } catch { return []; } }
+export { sha256Readable };
 export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin");

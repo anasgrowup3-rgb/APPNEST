@@ -29,15 +29,15 @@ class MiniAppStaticAcceptanceTest(unittest.TestCase):
 
     def test_all_three_locales_are_defined_and_persisted(self):
         for locale in ('tj', 'en'):
-            self.assertRegex(JS, rf'(?m)^\\s*{locale}:\\s*\\{{')
+            self.assertRegex(JS, rf'(?m)^\s*{locale}:\s*\{{')
         self.assertIn('["ru","tj","en"]', JS)
         self.assertIn('localStorage.setItem("appnest-language", language)', JS)
         self.assertIn('body:JSON.stringify({language})', JS)
         self.assertIn('translations[state.language]', JS)
 
     def test_mobile_and_accessibility_css_exists(self):
-        self.assertRegex(CSS, r'@media\\s*\\(max-width:\\s*360px\\)')
-        self.assertRegex(CSS, r'@media\\s*\\(max-width:\\s*480px\\)')
+        self.assertRegex(CSS, r'@media\s*\(max-width:\s*360px\)')
+        self.assertRegex(CSS, r'@media\s*\(max-width:\s*480px\)')
         self.assertIn("prefers-reduced-motion: reduce", CSS)
         self.assertIn(":focus-visible", CSS)
 

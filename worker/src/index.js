@@ -301,7 +301,12 @@ async function handle(request, env) {
       const meta={kind,filename:name,content_type:isApk?"application/vnd.android.package-archive":mime,app_id:appId,version:clean(b.version,40),version_code:Number(b.version_code)||0,min_android:clean(b.min_android,40),release_notes:clean(b.release_notes,2000),metadata:b.metadata||{}};
       if(isApk && (!meta.version || !Number.isSafeInteger(meta.version_code) || meta.version_code<1)) return fail("Укажите версию и version_code");
       if(isImage && size>10*1024*1024) return fail("Изображение превышает 10 МБ",413);
-      if(appId && !(await env.DB.prepare("SELECT id FROM apps WHERE id=?").bind(appId).first())) return fail("Приложение не найдено",404);
+      if(appId && (!Number.isSafeInteger(appId)||appId<1)) return fail("Некорректный app_id");
+      if(appId){
+        const app=await env.DB.prepare("SELECT id,version_code FROM apps WHERE id=?").bind(appId).first();
+        if(!app) return fail("Приложение не найдено",404);
+        if(isApk&&meta.version_code<=Number(app.version_code||0)) return fail("version_code должен быть больше текущей версии",409);
+      }
       const key=(isApk?"apk/":"media/")+crypto.randomUUID()+(isApk?".apk":mime==="image/png"?".png":mime==="image/webp"?".webp":".jpg");
       const mp=await createMultipart(env,key,meta.content_type),id=crypto.randomUUID(),expiry=Math.floor(Date.now()/1000)+86400;
       await env.DB.prepare("INSERT INTO upload_sessions(id,owner_id,app_id,object_key,r2_upload_id,metadata_json,expected_size,client_sha256,expires_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(id,userId,appId,key,mp.uploadId,JSON.stringify(meta),size,clean(b.sha256,64).toLowerCase(),expiry).run();
@@ -358,7 +363,8 @@ async function handle(request, env) {
         const sha=actualSha; verifiedApkSha=sha;
         if(session.app_id){
           const app=await env.DB.prepare("SELECT id,apk_key FROM apps WHERE id=?").bind(session.app_id).first();
-          await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
+          const known=await env.DB.prepare("SELECT id FROM app_versions WHERE app_id=? AND apk_key=?").bind(session.app_id,session.object_key).first();
+          if(!known) await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
           await env.DB.prepare("UPDATE apps SET version=?,version_code=?,min_android=?,size_bytes=?,apk_key=?,apk_sha256=?,updated_at=datetime('now') WHERE id=?").bind(meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,session.app_id).run();
         } else {
           const data=meta.metadata||{},title=clean(data.title,100),description=clean(data.description,5000),developer=clean(data.developer,120),category=clean(data.category,80);
@@ -366,7 +372,8 @@ async function handle(request, env) {
           const ins=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,version_code,min_android,size_bytes,apk_key,apk_sha256,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,"draft",userId).run();
           session.app_id=ins.meta.last_row_id;
           await env.DB.prepare("UPDATE upload_sessions SET app_id=? WHERE id=?").bind(session.app_id,id).run();
-          await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
+          const known=await env.DB.prepare("SELECT id FROM app_versions WHERE app_id=? AND apk_key=?").bind(session.app_id,session.object_key).first();
+          if(!known) await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
         }
       } else {
         const sampleObject=await env.FILES.get(session.object_key,{range:{offset:0,length:12}});
@@ -379,7 +386,7 @@ async function handle(request, env) {
         if(column) await env.DB.prepare("UPDATE apps SET "+column+"=?,updated_at=datetime('now') WHERE id=?").bind(session.object_key,session.app_id).run();
         else {
           const row=await env.DB.prepare("SELECT screenshots_json FROM apps WHERE id=?").bind(session.app_id).first();
-          const list=safeArray(row?.screenshots_json); list.push(session.object_key);
+          const list=safeArray(row?.screenshots_json); if(!list.includes(session.object_key)) list.push(session.object_key);
           await env.DB.prepare("UPDATE apps SET screenshots_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify(list.slice(-10)),session.app_id).run();
         }
       }
@@ -512,7 +519,8 @@ export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin");
     const allowed = env.ALLOWED_ORIGIN || "*";
-    const cors = { "access-control-allow-origin": allowed === "*" ? "*" : (origin === allowed ? origin : allowed), "vary": "Origin" };
+    const cors = { "vary": "Origin" };
+    if (allowed === "*" || (origin && origin === allowed)) cors["access-control-allow-origin"] = allowed === "*" ? "*" : origin;
     try {
       const response = await handle(request,env);
       const headers = new Headers(response.headers);

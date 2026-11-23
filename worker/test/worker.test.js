@@ -368,3 +368,48 @@ test("multipart upload cannot be accessed by a different Telegram owner", async 
   });
   assert.equal(response.status,404);
 });
+
+
+test("Telegram getChatMember mock enforces all and any subscription modes", async () => {
+  const originalFetch=globalThis.fetch;
+  const channels=[
+    {chat_id:"@channel_one",title:"One",invite_url:"https://t.me/channel_one"},
+    {chat_id:"@channel_two",title:"Two",invite_url:"https://t.me/channel_two"}
+  ];
+  const membership={"@channel_one":"member","@channel_two":"left"};
+  async function status(mode) {
+    const customEnv={
+      ...env(),
+      DB:{
+        prepare(sql){return{
+          bind(){return{
+            first:async()=>sql.includes("SELECT is_blocked")?{is_blocked:0}:sql.includes("SELECT count FROM rate_limits")?{count:1}:sql.includes("SELECT value FROM settings")?{value:mode}:null,
+            all:async()=>({results:sql.includes("FROM required_channels")?channels:[]}),
+            run:async()=>({meta:{changes:1}})
+          };},
+          first:async()=>null,all:async()=>({results:[]}),run:async()=>({meta:{changes:1}})
+        };}
+      }
+    };
+    globalThis.fetch=async(_url,options)=>{
+      const body=JSON.parse(options.body);
+      return new Response(JSON.stringify({ok:true,result:{status:membership[body.chat_id]}}),{status:200,headers:{"content-type":"application/json"}});
+    };
+    const response=await call("/subscription/status",{initData:signedInitData(42),environment:customEnv});
+    assert.equal(response.status,200);
+    return response.json();
+  }
+  try {
+    const all=await status("all");
+    assert.equal(all.allowed,false);
+    assert.equal(all.channels.filter(x=>x.subscribed).length,1);
+    const any=await status("any");
+    assert.equal(any.allowed,true);
+    assert.equal(any.channels.filter(x=>x.subscribed).length,1);
+    membership["@channel_two"]="administrator";
+    const allMembers=await status("all");
+    assert.equal(allMembers.allowed,true);
+  } finally {
+    globalThis.fetch=originalFetch;
+  }
+});

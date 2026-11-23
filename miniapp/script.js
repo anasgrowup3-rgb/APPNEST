@@ -501,7 +501,7 @@
     try {
       const [data,categories,users,notifications,feedback]=await Promise.all([request("/admin/overview"),request("/admin/categories"),request("/admin/users"),request("/admin/notifications"),request("/admin/feedback")]);
       $("#adminAppsCount").textContent=data.apps_count??"—";
-      const modeSelect=$("#subscriptionMode");if(modeSelect)modeSelect.value=data.subscription_mode||"all";$("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCount").textContent=data.downloads_count??"—";
+$("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCount").textContent=data.downloads_count??"—";
       $("#adminAppsList").innerHTML=(data.apps||[]).map(app=>`
         <article class="app-card admin-app-row"><div class="app-card-info"><h3>${escapeHTML(app.title)}</h3><p>${escapeHTML(app.category)} · v${escapeHTML(app.version)} · ${escapeHTML(app.status)}</p><small>${Number(app.downloads)||0} downloads</small></div>
         <div class="admin-actions"><button data-app-status="${app.id}" data-status="${app.status==="published"?"archived":"published"}">${app.status==="published"?"Архив":"Опубликовать"}</button><button data-app-edit="${app.id}" data-title="${escapeHTML(app.title)}" data-description="${escapeHTML(app.description||"")}" data-category="${escapeHTML(app.category||"other")}">Изменить</button><button data-app-versions="${app.id}">Версии</button><button data-app-update="${app.id}">Обновить APK</button></div></article>`).join("")||"Приложений пока нет";

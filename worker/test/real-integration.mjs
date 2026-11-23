@@ -111,8 +111,17 @@ ok(cancelled, 201, "create multipart session for abort");
 ok(await call(`/api/admin/uploads/${cancelled.data.upload_id}`, { userId: adminId, method: "DELETE" }), 200, "abort R2 multipart upload");
 ok(await call(`/api/admin/uploads/${cancelled.data.upload_id}/parts?part_number=1`, { userId: adminId, method: "PUT", raw: Buffer.from("12345678") }), 404, "aborted upload cannot accept parts");
 passed("real R2 multipart abort and closed-session enforcement");
+ok(await call(`/api/admin/uploads/${cancelled.data.upload_id}/parts?part_number=1`, { method: "PUT", raw: Buffer.from("12345678") }), 401, "multipart part upload rejects missing Telegram authorization");
 
 const apk = Buffer.alloc(8 * 1024 * 1024, 0x41);
+const badHashUpload = await call("/api/admin/uploads", {
+  userId: adminId, method: "POST",
+  body: { kind: "apk", filename: "checksum-failure.apk", size_bytes: apk.length, content_type: "application/vnd.android.package-archive", version: "0.0.2", version_code: 2, min_android: "7", sha256: "0".repeat(64), metadata: { title: "Checksum failure fixture", description: "Must never be published", category: categorySlug } }
+});
+ok(badHashUpload, 201, "create checksum-failure multipart session");
+ok(await call(`/api/admin/uploads/${badHashUpload.data.upload_id}/parts?part_number=1`, { userId: adminId, method: "PUT", raw: apk }), 200, "upload checksum-failure part");
+ok(await call(`/api/admin/uploads/${badHashUpload.data.upload_id}/complete`, { userId: adminId, method: "POST", body: {} }), 422, "reject mismatched APK SHA-256");
+passed("R2 checksum mismatch is rejected and not published");
 apk.write("\x50\x4b\x03\x04", 0, "binary");
 const expectedSha = createHash("sha256").update(apk).digest("hex");
 const upload = await call("/api/admin/uploads", {
@@ -166,6 +175,13 @@ ok(history, 200, "admin version history");
 assert.ok(history.data.versions.length >= 1);
 passed("D1 APK version history");
 
+await call("/api/admin/subscription-mode", { userId: adminId, method: "PUT", body: { mode: "all" } });
+ok(await call(`/api/apps/${appId}/download-ticket`, { userId: memberOne, method: "POST", body: {} }), 403, "all-mode download denied for one-channel member");
+ok(await call(`/api/apps/${appId}/download-ticket`, { userId: nonmember, method: "POST", body: {} }), 403, "all-mode download denied for non-member");
+await call("/api/admin/subscription-mode", { userId: adminId, method: "PUT", body: { mode: "any" } });
+ok(await call(`/api/apps/${appId}/download-ticket`, { userId: memberOne, method: "POST", body: {} }), 200, "any-mode download allowed for one-channel member");
+ok(await call(`/api/apps/${appId}/download-ticket`, { userId: nonmember, method: "POST", body: {} }), 403, "any-mode download denied for non-member");
+passed("download authorization enforces all/any channel membership");
 const ticket = await call(`/api/apps/${appId}/download-ticket`, { userId: memberAll, method: "POST", body: {} });
 ok(ticket, 200, "issue subscription-checked download ticket");
 const downloadUrl = base + ticket.data.url;

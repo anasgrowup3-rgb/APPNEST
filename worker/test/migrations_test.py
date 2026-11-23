@@ -14,7 +14,7 @@ class MigrationSmokeTest(unittest.TestCase):
         row = db.execute("SELECT telegram_id, first_name, language FROM users WHERE telegram_id='123'").fetchone()
         self.assertEqual(row, ("123", "Existing", "ru"))
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        self.assertTrue({"upload_sessions", "upload_parts", "ad_frequency", "app_versions"} <= tables)
+        self.assertTrue({"upload_sessions", "upload_parts", "ad_frequency", "app_versions", "download_tokens"} <= tables)
         db.close()
 
 if __name__ == "__main__":

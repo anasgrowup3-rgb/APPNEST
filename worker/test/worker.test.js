@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, createHash } from "node:crypto";
-import worker, { sha256Readable, cleanupExpired } from "../src/index.js";
+import worker, { sha256Readable, cleanupExpired, mediaObject } from "../src/index.js";
 
 const TOKEN = "123456:TEST_TOKEN_FOR_UNIT_TESTS_ONLY";
 class MockDB {
@@ -230,12 +230,14 @@ test("scheduled cleanup aborts expired R2 multipart sessions and batches retenti
 });
 
 test("published media lookup requires an exact referenced key and media namespace", async () => {
-  const statements=[];
-  const customEnv={DB:{prepare(sql){statements.push(sql);return{bind(...args){return{all:async()=>({results:[{icon_key:"media/icon.png",banner_key:null,screenshots_json:'["media/screen.png"]'}]})};}};}},FILES:{get:async key=>({key,body:new Uint8Array([1])})}};
-  const module=await import("../src/index.js");
-  const response=await module.default.fetch(new Request("https://api.example/api/health"),{...env()});
-  assert.equal(response.status,200);
-  assert.equal(statements.length,0);
+  const customEnv={
+    DB:{prepare(sql){return{bind(...args){return{all:async()=>({results:[{icon_key:"media/icon.png",banner_key:null,screenshots_json:'["media/screen.png"]'}]})};}};}},
+    FILES:{get:async key=>({key,body:new Uint8Array([1])})}
+  };
+  assert.equal((await mediaObject(customEnv,"media/icon.png")).key,"media/icon.png");
+  assert.equal((await mediaObject(customEnv,"media/screen.png")).key,"media/screen.png");
+  assert.equal(await mediaObject(customEnv,"media/not-referenced.png"),null);
+  assert.equal(await mediaObject(customEnv,"apk/private.apk"),null);
 });
 test("worker rejects an unconfigured CORS origin instead of emitting wildcard", async () => {
   const environment={...env(),ALLOWED_ORIGIN:""};

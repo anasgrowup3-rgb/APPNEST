@@ -1240,3 +1240,16 @@ h1, h2, h3 {
 .admin-extras form{display:grid;gap:10px;margin:12px 0}
 .admin-extras form input,.admin-extras form textarea,.admin-extras form select{width:100%;min-width:0}
 .admin-extra-tabs{display:flex;gap:8px;flex-wrap:wrap}
+
+/* Admin analytics and audit log */
+.admin-metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.admin-metric-grid p{padding:12px;border:1px solid var(--border,rgba(255,255,255,.1));border-radius:12px;background:var(--surface,#111)}
+.admin-chart{display:grid;gap:9px;margin:12px 0 22px}
+.admin-chart-row{display:grid;grid-template-columns:86px minmax(40px,1fr) 34px;gap:9px;align-items:center;font-size:12px}
+.admin-chart-row>span{color:var(--muted,#999)}
+.admin-chart-row>strong{text-align:right;font-variant-numeric:tabular-nums}
+.admin-chart-track{height:9px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+.admin-chart-track i{display:block;height:100%;border-radius:inherit;background:var(--accent,#8b5cf6)}
+.admin-audit-row{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:12px 0;border-bottom:1px solid var(--border,rgba(255,255,255,.1))}
+.admin-audit-row span{color:var(--muted,#999);overflow-wrap:anywhere}
+.admin-audit-row small{grid-column:1/-1;color:var(--muted,#999)}

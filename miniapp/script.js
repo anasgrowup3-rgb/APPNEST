@@ -484,32 +484,26 @@
 
   async function loadAdmin() {
     if (!state.isAdmin) return navigate("home");
-
     try {
-      const data = await request("/admin/overview");
-
-      $("#adminAppsCount") && ($("#adminAppsCount").textContent = data.apps_count ?? "—");
-      $("#adminUsersCount") && ($("#adminUsersCount").textContent = data.users_count ?? "—");
-      $("#adminDownloadsCount") && ($("#adminDownloadsCount").textContent = data.downloads_count ?? "—");
-
-      const apps = data.apps || state.apps;
-      renderList($("#adminAppsList"), apps);
-
-      $("#adminFeedbackList") && (
-        $("#adminFeedbackList").innerHTML = (data.feedback || []).map(item => `
-          <article class="admin-feedback">
-            <p>${escapeHTML(item.message)}</p>
-            <small>${escapeHTML(item.created_at || "")}</small>
-          </article>
-        `).join("") || "Отзывов пока нет"
-      );
-
-      $("#adminAnalytics") && (
-        $("#adminAnalytics").textContent = "Данные статистики загружены."
-      );
-    } catch (error) {
-      toast("Не удалось загрузить панель: " + error.message);
-    }
+      const [data,categories,users]=await Promise.all([request("/admin/overview"),request("/admin/categories"),request("/admin/users")]);
+      $("#adminAppsCount").textContent=data.apps_count??"—";$("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCount").textContent=data.downloads_count??"—";
+      $("#adminAppsList").innerHTML=(data.apps||[]).map(app=>`
+        <article class="app-card admin-app-row"><div class="app-card-info"><h3>${escapeHTML(app.title)}</h3><p>${escapeHTML(app.category)} · v${escapeHTML(app.version)} · ${escapeHTML(app.status)}</p><small>${Number(app.downloads)||0} downloads</small></div>
+        <div class="admin-actions"><button data-app-status="${app.id}" data-status="${app.status==="published"?"archived":"published"}">${app.status==="published"?"Архив":"Опубликовать"}</button><button data-app-versions="${app.id}">Версии</button></div></article>`).join("")||"Приложений пока нет";
+      $("#adminFeedbackList").innerHTML=(data.feedback||[]).map(item=>`<article class="admin-feedback"><p>${escapeHTML(item.message)}</p><small>${escapeHTML(item.created_at||"")} · ${escapeHTML(item.user_id||"")}</small><button data-feedback-resolve="${item.id}">Закрыть</button></article>`).join("")||"Отзывов пока нет";
+      $("#adminAnalytics").innerHTML=`<p>Пользователи: <strong>${data.users_count||0}</strong></p><p>Опубликованные приложения: <strong>${data.apps_count||0}</strong></p><p>Скачивания: <strong>${data.downloads_count||0}</strong></p><h3>Кампании</h3>${(data.ads||[]).map(ad=>`<p>${escapeHTML(ad.title)} · ${ad.impressions} показов · ${ad.clicks} кликов <button data-ad-toggle="${ad.id}" data-active="${ad.active?0:1}">${ad.active?"Выключить":"Включить"}</button></p>`).join("")||"Нет кампаний"}`;
+      let extra=$("#adminExtras");if(!extra){extra=document.createElement("section");extra.id="adminExtras";extra.className="admin-panel active";$("#page-admin").append(extra);}
+      extra.innerHTML=`
+        <div class="admin-tabs admin-extra-tabs">
+          <button data-extra-tab="categories">Категории</button><button data-extra-tab="channels">Каналы</button><button data-extra-tab="ads">Реклама</button><button data-extra-tab="users">Пользователи</button><button data-extra-tab="notifications">Уведомления</button>
+        </div>
+        <section data-extra-panel="categories"><h3>Категории</h3><form id="categoryForm"><input name="slug" placeholder="slug" required><input name="title" placeholder="Название" required><input name="icon" placeholder="Иконка"><button>Добавить</button></form><div>${(categories.categories||[]).map(c=>`<p>${escapeHTML(c.title)} (${escapeHTML(c.slug)})</p>`).join("")}</div></section>
+        <section data-extra-panel="channels" hidden><h3>Обязательные каналы</h3><form id="channelForm"><input name="chat_id" placeholder="@channel или -100…" required><input name="title" placeholder="Название" required><input name="invite_url" placeholder="https://t.me/..." required><button>Добавить канал</button></form><label>Условие подписки<select id="subscriptionMode"><option value="all">На все каналы</option><option value="any">На любой канал</option></select></label><div>${(data.channels||[]).map(c=>`<p>${escapeHTML(c.title)} · ${c.enabled?"включён":"выключен"} <button data-channel-toggle="${c.id}" data-enabled="${c.enabled?0:1}">${c.enabled?"Отключить":"Включить"}</button></p>`).join("")}</div></section>
+        <section data-extra-panel="ads" hidden><h3>Рекламная кампания</h3><form id="adForm"><input name="title" placeholder="Название кампании" required><select name="kind"><option value="banner">Баннер</option><option value="channel">Telegram-канал</option><option value="task">Задание</option></select><input name="creative_url" placeholder="URL изображения (необязательно)"><input name="target_url" placeholder="HTTPS ссылка" required><label>Начало<input name="starts_at" type="datetime-local" required></label><label>Окончание<input name="ends_at" type="datetime-local" required></label><button>Создать кампанию</button></form><p>Частота: не более 3 показов одного объявления пользователю в день.</p></section>
+        <section data-extra-panel="users" hidden><h3>Пользователи</h3><div>${(users.users||[]).map(u=>`<p>${escapeHTML(u.first_name)} @${escapeHTML(u.username||"")} · ${escapeHTML(u.telegram_id)} · ${u.is_blocked?"заблокирован":"активен"} <button data-user-block="${escapeHTML(u.telegram_id)}" data-blocked="${u.is_blocked?0:1}">${u.is_blocked?"Разблокировать":"Заблокировать"}</button></p>`).join("")}</div></section>
+        <section data-extra-panel="notifications" hidden><h3>Новое уведомление</h3><form id="notificationForm"><input name="title" placeholder="Заголовок" required><textarea name="message" placeholder="Сообщение" required></textarea><button>Опубликовать</button></form></section>`;
+      $("#adminAppsList").querySelectorAll(".admin-actions button").forEach(b=>b.classList.add("secondary-button"));
+    } catch(error){toast("Не удалось загрузить панель: "+error.message);}
   }
 
   function adminAddAppForm() {
@@ -681,6 +675,20 @@
       return;
     }
 
+    const extraTab=event.target.closest("[data-extra-tab]");
+    if(extraTab){$("#adminExtras").querySelectorAll("[data-extra-panel]").forEach(p=>p.hidden=p.dataset.extraPanel!==extraTab.dataset.extraTab);return;}
+    const statusButton=event.target.closest("[data-app-status]");
+    if(statusButton){request("/admin/apps/"+statusButton.dataset.appStatus,{method:"PATCH",body:JSON.stringify({status:statusButton.dataset.status})}).then(loadAdmin).catch(e=>toast(e.message));return;}
+    const versionsButton=event.target.closest("[data-app-versions]");
+    if(versionsButton){request("/admin/apps/"+versionsButton.dataset.appVersions+"/versions").then(d=>openModal("<h2>История версий</h2>"+(d.versions||[]).map(v=>"<p>v"+escapeHTML(v.version)+" · "+escapeHTML(v.created_at)+"<br>"+escapeHTML(v.release_notes||"")+"</p>").join("") )).catch(e=>toast(e.message));return;}
+    const adToggle=event.target.closest("[data-ad-toggle]");
+    if(adToggle){request("/admin/ads/"+adToggle.dataset.adToggle,{method:"PATCH",body:JSON.stringify({active:adToggle.dataset.active==="1"})}).then(loadAdmin).catch(e=>toast(e.message));return;}
+    const channelToggle=event.target.closest("[data-channel-toggle]");
+    if(channelToggle){request("/admin/channels/"+channelToggle.dataset.channelToggle,{method:"PATCH",body:JSON.stringify({enabled:channelToggle.dataset.enabled==="1"})}).then(loadAdmin).catch(e=>toast(e.message));return;}
+    const userBlock=event.target.closest("[data-user-block]");
+    if(userBlock){request("/admin/users/"+userBlock.dataset.userBlock,{method:"PATCH",body:JSON.stringify({blocked:userBlock.dataset.blocked==="1"})}).then(loadAdmin).catch(e=>toast(e.message));return;}
+    const feedbackResolve=event.target.closest("[data-feedback-resolve]");
+    if(feedbackResolve){request("/admin/feedback/"+feedbackResolve.dataset.feedbackResolve,{method:"PATCH",body:JSON.stringify({status:"resolved"})}).then(loadAdmin).catch(e=>toast(e.message));return;}
     const adminTab = event.target.closest("[data-admin-tab]");
     if (adminTab) {
       $$(".admin-tab").forEach(el => el.classList.toggle("active", el === adminTab));
@@ -752,6 +760,7 @@
   $("#historyButton")?.addEventListener("click", () => navigate("history"));
   $("#addAppButton")?.addEventListener("click", adminAddAppForm);
 
+  $("#subscriptionMode")?.addEventListener("change",event=>request("/admin/subscription-mode",{method:"PUT",body:JSON.stringify({mode:event.target.value})}).catch(e=>toast(e.message)));
   $("#languageSelect")?.addEventListener("change", event => {
     setLanguage(event.target.value);
   });
@@ -762,6 +771,11 @@
       submitApp(event.target);
     }
 
+    const form=event.target;
+    if(form.id==="categoryForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/categories",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
+    if(form.id==="channelForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/channels",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
+    if(form.id==="adForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));d.starts_at=new Date(d.starts_at).toISOString().replace("T"," ").slice(0,19);d.ends_at=new Date(d.ends_at).toISOString().replace("T"," ").slice(0,19);request("/admin/ads",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
+    if(form.id==="notificationForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/notifications",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
     if (event.target.id === "feedbackForm") {
       event.preventDefault();
       submitFeedback(event.target);

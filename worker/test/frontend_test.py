@@ -13,6 +13,8 @@ class MiniAppStaticAcceptanceTest(unittest.TestCase):
         self.assertIn("https://telegram.org/js/telegram-web-app.js", HTML)
         self.assertIn("tg?.ready()", JS)
         self.assertIn("tg?.expand()", JS)
+        self.assertIn('name="appnest-api-base"', HTML)
+        self.assertIn("appnest-api-base", JS)
 
     def test_required_user_and_admin_sections_exist(self):
         ids = set(re.findall(r'id="([^"]+)"', HTML))
@@ -47,9 +49,12 @@ class MiniAppStaticAcceptanceTest(unittest.TestCase):
         self.assertIn("for(let attempt=0;attempt<3&&!done;attempt++)", JS)
         self.assertIn("uploadFileMultipart", JS)
         self.assertIn("XMLHttpRequest", JS)
+        self.assertIn("const uploadSessionCache = new WeakMap()", JS)
+        self.assertIn("session.completedParts.has(part)", JS)
+        self.assertIn("sessions.delete(cacheKey)", JS)
+        self.assertIn("Keep the open R2 session", JS)
 
     def test_ui_uses_server_verified_subscription_and_download_ticket(self):
-        self.assertIn("/download-ticket", JS)
         self.assertIn("/download-ticket", JS)
         self.assertIn("subscription_required", JS)
         self.assertIn("Проверить снова", JS)

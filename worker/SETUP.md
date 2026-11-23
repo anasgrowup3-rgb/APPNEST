@@ -82,3 +82,73 @@ Authenticated: `GET/PATCH /api/me`, favorites, app versions, app downloads, ads/
 Admin: app metadata/status/version history, multipart uploads, categories, channels and subscription mode, campaigns, users/blocking, notifications, feedback and audit events.
 
 No production deployment is performed by these instructions.
+
+
+## Isolated real-service integration testing
+
+Do not point this test harness at production. It creates D1 rows, an APK object, image media, channel records, ad campaigns, feedback and notifications. It intentionally leaves these fixtures in place for inspection. Use a dedicated disposable D1 database and private R2 bucket.
+
+### Create the isolated resources
+
+1. In Cloudflare Dashboard, open **Workers & Pages → D1 SQL Database → Create**. Name it `appnest-integration-db`. Do not select the production database. Copy its database ID.
+2. Open **R2 Object Storage → Create bucket**. Name it `appnest-integration-files`. Leave public access disabled: do not enable `r2.dev`, a custom domain, or public bucket access.
+3. In **Workers & Pages**, create a separate Worker named `appnest-integration-api`. Do not edit the existing `appnest-api` Worker or any Pages project.
+4. Make a local copy of `worker/wrangler.integration.example.jsonc` named `worker/wrangler.integration.local.jsonc`. Replace the D1 database ID, confirm the R2 bucket name, set `ADMIN_IDS` to the dedicated test administrator's numeric Telegram ID, and set `ALLOWED_ORIGIN` to the origin that will host the separate test Mini App. Never commit the local file.
+5. From the `worker` directory, apply the migrations to the disposable database and deploy only the separate integration Worker:
+
+```sh
+npx wrangler d1 migrations apply appnest-integration-db --remote --config wrangler.integration.local.jsonc
+npx wrangler secret put BOT_TOKEN --config wrangler.integration.local.jsonc
+npx wrangler deploy --config wrangler.integration.local.jsonc
+```
+
+When prompted for `BOT_TOKEN`, paste it directly into the terminal prompt. Do not put it in a command argument, source file, GitHub issue, chat, or commit. Confirm the deployed URL belongs to `appnest-integration-api`, not the production Worker.
+
+### Telegram test fixtures
+
+Create two disposable Telegram channels. Add the test bot as an administrator in both channels with permission to view members. Use three separate test user accounts:
+- `APPNEST_TEST_MEMBER_ALL_ID`: joined both channels.
+- `APPNEST_TEST_MEMBER_ONE_ID`: joined channel one only.
+- `APPNEST_TEST_NONMEMBER_ID`: joined neither channel.
+- `APPNEST_TEST_ADMIN_ID`: separate test administrator ID; add it to Worker `ADMIN_IDS`.
+
+The test harness creates cryptographically HMAC-signed Telegram initData payloads from the bot token so that authenticated API paths can be exercised. These are synthetic signed fixtures, not Telegram-client-issued initData. The subsequent `getChatMember` requests are real Telegram Bot API requests for the three configured Telegram accounts. To prove real WebView-issued initData, open the separate test Mini App from Telegram and perform the additional manual check described below.
+
+### Run the integration suite
+
+Set these variables in a private local `.env.integration` file (which is ignored by Git):
+
+```dotenv
+APPNEST_TEST_BASE_URL=https://YOUR-INTEGRATION-WORKER.workers.dev
+APPNEST_TEST_BOT_TOKEN=YOUR_BOT_TOKEN
+APPNEST_TEST_ADMIN_ID=YOUR_TEST_ADMIN_ID
+APPNEST_TEST_MEMBER_ALL_ID=YOUR_USER_JOINED_TO_BOTH_CHANNELS
+APPNEST_TEST_MEMBER_ONE_ID=YOUR_USER_JOINED_TO_CHANNEL_ONE_ONLY
+APPNEST_TEST_NONMEMBER_ID=YOUR_USER_JOINED_TO_NEITHER_CHANNEL
+APPNEST_TEST_CHANNEL_ONE_ID=-1001234567890
+APPNEST_TEST_CHANNEL_ONE_URL=https://t.me/YOUR_TEST_CHANNEL_ONE
+APPNEST_TEST_CHANNEL_TWO_ID=-1001234567891
+APPNEST_TEST_CHANNEL_TWO_URL=https://t.me/YOUR_TEST_CHANNEL_TWO
+```
+
+Run:
+
+```sh
+cd worker
+node --env-file=../.env.integration test/real-integration.mjs
+```
+
+The script verifies real Worker HTTP requests, D1 CRUD, channel membership via Telegram, all/any subscription behavior, multipart create/part retry/abort/complete, server SHA-256, published media, version history, download ticket single-use behavior, campaign analytics/frequency cap, feedback, notifications and admin authorization. The APK fixture has a ZIP local-file signature and deterministic bytes; it is an integrity/API fixture, not a valid installable APK or malware scan.
+
+The script leaves all fixtures in the disposable database and bucket. After evidence is collected, delete the dedicated integration Worker, D1 database and R2 bucket in Cloudflare Dashboard. Do not run cleanup commands against production.
+
+### Real browser and Telegram WebView acceptance
+
+The repository Mini App currently has its production API base URL embedded in `miniapp/script.js`. Do not open the existing production Mini App and do not change the production Pages project for this test. For a separate manual UI test, create a separate Cloudflare Pages project from the same branch and configure a test-only copy of the Mini App to point to the integration Worker. Set the integration Worker `ALLOWED_ORIGIN` to that Pages preview origin. Open the preview in Android Chrome, then open the same preview URL through a Telegram bot Web App button. Verify the real `Telegram.WebApp.initData`, RU/TJ/EN switching, catalog, app details, subscription gate, download, favorites, profile, upload progress/retry, and admin screens. Do not use production APKs or production user accounts.
+
+### What this does not prove
+
+- The synthetic HMAC fixtures validate Worker signature checking, but they do not replace a live Telegram client session test.
+- R2 bucket privacy must also be confirmed in Cloudflare Dashboard: public access disabled and no public custom domain. The HTTP checks prove that the Worker does not expose the APK through its media route and that downloads use one-time tickets.
+- A passing integration suite does not certify APK malware safety, Google Play compatibility, or installability.
+- Browser/Android WebView checks require a real Android device and the separate Pages preview.

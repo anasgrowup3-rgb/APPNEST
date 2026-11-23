@@ -16,6 +16,7 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+WEBAPP_URL = os.getenv("WEBAPP_URL", "").strip()
 
 if not TOKEN:
     raise ValueError("BOT_TOKEN не найден в .env")
@@ -128,6 +129,13 @@ TEXTS = {
 }
 
 
+def webapp_keyboard():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    if WEBAPP_URL.startswith("https://"):
+        keyboard.add(types.KeyboardButton("📱 Открыть APPNEST", web_app=types.WebAppInfo(url=WEBAPP_URL)))
+    return keyboard
+
+
 def language_keyboard():
     keyboard = types.InlineKeyboardMarkup()
     keyboard.row(
@@ -191,7 +199,8 @@ def choose_language(call):
 
     bot.send_message(
         call.message.chat.id,
-        TEXTS[language]["welcome"]
+        TEXTS[language]["welcome"],
+        reply_markup=webapp_keyboard()
     )
 
 
@@ -201,6 +210,18 @@ def change_language(message):
         message.chat.id,
         "🌐 Выбери язык / Choose language:",
         reply_markup=language_keyboard()
+    )
+
+
+@bot.message_handler(commands=["open", "catalog"])
+def open_mini_app(message):
+    if not WEBAPP_URL.startswith("https://"):
+        bot.reply_to(message, "Mini App пока не настроен. Администратор должен указать WEBAPP_URL (HTTPS).")
+        return
+    bot.send_message(
+        message.chat.id,
+        "Открой каталог APPNEST:",
+        reply_markup=webapp_keyboard()
     )
 
 
@@ -222,6 +243,7 @@ def help_command(message):
             "/stats — статистика каталога\n"
             "/cancel — отменить действие\n"
             "/id — узнать свой ID\n"
+            "/open — открыть Mini App\\n"
             "/help — помощь"
         )
     else:

@@ -504,7 +504,7 @@
       $("#adminAppsCount").textContent=data.apps_count??"—";$("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCount").textContent=data.downloads_count??"—";
       $("#adminAppsList").innerHTML=(data.apps||[]).map(app=>`
         <article class="app-card admin-app-row"><div class="app-card-info"><h3>${escapeHTML(app.title)}</h3><p>${escapeHTML(app.category)} · v${escapeHTML(app.version)} · ${escapeHTML(app.status)}</p><small>${Number(app.downloads)||0} downloads</small></div>
-        <div class="admin-actions"><button data-app-status="${app.id}" data-status="${app.status==="published"?"archived":"published"}">${app.status==="published"?"Архив":"Опубликовать"}</button><button data-app-versions="${app.id}">Версии</button></div></article>`).join("")||"Приложений пока нет";
+        <div class="admin-actions"><button data-app-status="${app.id}" data-status="${app.status==="published"?"archived":"published"}">${app.status==="published"?"Архив":"Опубликовать"}</button><button data-app-versions="${app.id}">Версии</button><button data-app-update="${app.id}">Обновить APK</button></div></article>`).join("")||"Приложений пока нет";
       $("#adminFeedbackList").innerHTML=(data.feedback||[]).map(item=>`<article class="admin-feedback"><p>${escapeHTML(item.message)}</p><small>${escapeHTML(item.created_at||"")} · ${escapeHTML(item.user_id||"")}</small><button data-feedback-resolve="${item.id}">Закрыть</button></article>`).join("")||"Отзывов пока нет";
       $("#adminAnalytics").innerHTML=`<p>Пользователи: <strong>${data.users_count||0}</strong></p><p>Опубликованные приложения: <strong>${data.apps_count||0}</strong></p><p>Скачивания: <strong>${data.downloads_count||0}</strong></p><h3>Кампании</h3>${(data.ads||[]).map(ad=>`<p>${escapeHTML(ad.title)} · ${ad.impressions} показов · ${ad.clicks} кликов <button data-ad-toggle="${ad.id}" data-active="${ad.active?0:1}">${ad.active?"Выключить":"Включить"}</button></p>`).join("")||"Нет кампаний"}`;
       let extra=$("#adminExtras");if(!extra){extra=document.createElement("section");extra.id="adminExtras";extra.className="admin-panel active";$("#page-admin").append(extra);}
@@ -661,7 +661,7 @@
     }
 
     const adLink=event.target.closest("[data-ad-click]");
-    if(adLink){const id=adLink.dataset.adClick;request("/ads/"+id+"/click",{method:"POST",body:JSON.stringify({})}).catch(()=>{});return;}
+    if(adLink){event.preventDefault();const id=adLink.dataset.adClick;const destination=adLink.href;window.open(destination,"_blank","noopener,noreferrer");request("/ads/"+id+"/click",{method:"POST",body:JSON.stringify({})}).catch(()=>{});return;}
 
     const openButton = event.target.closest("[data-open-app]");
     if (openButton) {
@@ -697,6 +697,8 @@
     if(extraTab){$("#adminExtras").querySelectorAll("[data-extra-panel]").forEach(p=>p.hidden=p.dataset.extraPanel!==extraTab.dataset.extraTab);return;}
     const statusButton=event.target.closest("[data-app-status]");
     if(statusButton){request("/admin/apps/"+statusButton.dataset.appStatus,{method:"PATCH",body:JSON.stringify({status:statusButton.dataset.status})}).then(loadAdmin).catch(e=>toast(e.message));return;}
+    const updateButton=event.target.closest("[data-app-update]");
+    if(updateButton){openModal(`<h2>Обновить APK</h2><form id="updateApkForm" data-app-id="${updateButton.dataset.appUpdate}"><label>Версия<input name="version" required></label><label>Version code<input name="version_code" type="number" min="1" required></label><label>Минимальный Android<input name="min_android"></label><label>Что нового<textarea name="release_notes"></textarea></label><label>APK<input name="apk" type="file" accept=".apk,application/vnd.android.package-archive" required></label><progress id="uploadProgress" max="100" value="0" style="width:100%"></progress><p id="uploadStatus" hidden></p><button class="primary-button full-button" type="submit">Загрузить обновление</button></form>`);return;}
     const versionsButton=event.target.closest("[data-app-versions]");
     if(versionsButton){request("/admin/apps/"+versionsButton.dataset.appVersions+"/versions").then(d=>openModal("<h2>История версий</h2>"+(d.versions||[]).map(v=>"<p>v"+escapeHTML(v.version)+" · "+escapeHTML(v.created_at)+"<br>"+escapeHTML(v.release_notes||"")+"</p>").join("") )).catch(e=>toast(e.message));return;}
     const adToggle=event.target.closest("[data-ad-toggle]");
@@ -790,6 +792,7 @@
     }
 
     const form=event.target;
+    if(form.id==="updateApkForm"){event.preventDefault();const d=new FormData(form),file=d.get("apk"),button=form.querySelector("button");button.disabled=true;const status=$("#uploadStatus");status.hidden=false;uploadFileMultipart(file,"apk",{app_id:Number(form.dataset.appId),version:d.get("version"),version_code:Number(d.get("version_code")),min_android:d.get("min_android"),release_notes:d.get("release_notes")},setUploadProgress).then(()=>{closeModal();toast("Обновление загружено");loadAdmin();loadApps();}).catch(e=>{status.textContent="Ошибка: "+e.message+" · Нажмите повторить";button.disabled=false;button.textContent="Повторить загрузку";toast(e.message);});}
     if(form.id==="categoryForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/categories",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
     if(form.id==="channelForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/channels",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
     if(form.id==="adForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));d.starts_at=new Date(d.starts_at).toISOString().replace("T"," ").slice(0,19);d.ends_at=new Date(d.ends_at).toISOString().replace("T"," ").slice(0,19);request("/admin/ads",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}

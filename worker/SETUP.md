@@ -1,30 +1,84 @@
 # APPNEST Cloudflare Worker setup
 
-This release keeps the existing static Mini App and Python bot. The Worker API uses D1 + private R2.
+The implementation retains the existing static HTML/CSS/JavaScript Mini App, Cloudflare Worker, D1, private R2 and the existing Python Telegram bot. No production resources are created or changed by this repository patch.
 
-## Required bindings (configure in Cloudflare dashboard or wrangler secrets/settings)
-- D1 database binding **DB**.
-- R2 bucket binding **FILES**. Keep the bucket private; do not enable public development URLs or custom public domains.
-- Secret **BOT_TOKEN**: Telegram bot token (never commit it).
-- Variable **ADMIN_IDS**: comma-separated numeric Telegram user IDs.
-- Variable **ALLOWED_ORIGIN**: exact Mini App origin, e.g. https://your-miniapp.example (avoid * in production).
-- Optional **TELEGRAM_AUTH_MAX_AGE** (seconds, default 86400), **MAX_APK_BYTES** (default 1 GiB).
+## Required Cloudflare bindings and secrets
 
-The current wrangler config intentionally does not invent a D1 database_id or bucket name. Add the actual resource identifiers to the existing configuration before deployment.
+Configure these on the existing Worker in the Cloudflare dashboard (or in the existing Wrangler configuration after creating real resources):
 
-## Migration
-Run `npx wrangler d1 migrations apply <YOUR_DATABASE> --remote` after placing this SQL in a migration directory (or execute it through D1 console). It is additive and does not delete existing data. Back up D1 first.
+- D1 binding **DB** — the APPNEST database.
+- R2 bucket binding **FILES** — private bucket only. Do not enable public development URLs or a public custom domain.
+- Secret **BOT_TOKEN** — Telegram bot token; never commit it.
+- Variable **ADMIN_IDS** — comma-separated numeric Telegram administrator IDs.
+- Variable **ALLOWED_ORIGIN** — exact HTTPS origin of the Mini App. Do not use `*` in production.
+- Optional **MAX_APK_BYTES** — maximum multipart APK size, default 2 GiB.
+- Optional **MAX_DIRECT_APK_BYTES** — legacy single-request upload limit, default 16 MiB.
+- Optional **TELEGRAM_AUTH_MAX_AGE** — Telegram initData maximum age in seconds, default 86400.
 
-## API notes
-- All user routes require a fresh, valid Telegram WebApp initData signature.
-- APK bytes are streamed through the Worker only after subscription verification. Never expose R2 public URLs.
-- The bot must be an administrator in each required channel to call getChatMember reliably.
-- Subscription checks fail closed on Telegram API errors.
-- Upload currently supports direct multipart/form-data requests up to MAX_APK_BYTES, but buffering the full file in Worker memory is not a resumable multipart R2 upload. Large-file multipart sessions and app version management require a separate resumable upload flow before production use.
-- SHA-256 and ZIP signature are checked at upload. This does not establish that an APK is safe to install; perform malware/static analysis separately.
-- The D1 rate limiter is persisted; deploy migrations before enabling API traffic.
+The repository's `worker/wrangler.jsonc` deliberately does not contain fabricated D1 database IDs or R2 bucket names. Add the actual identifiers once the resources exist. The binding names must remain exactly `DB` and `FILES`.
 
-## Routes
-Public: GET /api/health, GET /api/apps.
-Authenticated: GET /api/me, POST/DELETE /api/favorites/:id, POST /api/apps/:id/download, GET /api/ads, POST /api/ads/:id/impression|click, GET /api/subscription/status, POST /api/feedback.
-Admin: GET /api/admin/overview, POST /api/admin/apps, PATCH /api/admin/apps/:id, POST /api/admin/channels, PUT /api/admin/subscription-mode, POST /api/admin/ads, PATCH /api/admin/users/:telegramId, POST /api/admin/notifications, GET /api/admin/feedback, GET /api/admin/audit.
+## Migrations
+
+Back up D1 before applying migrations. Both migrations are additive; they do not delete existing application/user rows.
+
+From the `worker` directory, apply them to the intended database:
+
+```sh
+npx wrangler d1 migrations apply <YOUR_DATABASE_NAME> --remote
+```
+
+- `migrations/0001_appnest.sql` — base catalog, users, favorites, downloads, channels, ads and audit schema.
+- `migrations/0002_uploads_ads.sql` — multipart session/part tracking, per-user ad frequency and persisted language; seeds the existing four categories.
+
+The migration smoke test uses an in-memory SQLite database and verifies that an existing user row survives both migrations. It is not a substitute for applying migrations to the actual Cloudflare D1 database.
+
+## Resumable APK and media uploads
+
+The admin UI uses R2 multipart uploads. R2 part size is 8 MiB; failed parts are retried up to three times. An admin can retry a failed form upload. The Worker checks ownership/expiry, part ordering, total object size, ZIP signature and a server-computed streaming SHA-256 before saving APK metadata. Large APK bytes are streamed into R2 and hashed as a stream rather than buffered in Worker memory.
+
+- `POST /api/admin/uploads` — create upload session. JSON includes `kind`, `filename`, `size_bytes`, `content_type`, optional `app_id`, version metadata and new-app `metadata`.
+- `PUT /api/admin/uploads/:id/parts?part_number=N` — stream one raw 8 MiB part.
+- `POST /api/admin/uploads/:id/complete` — validate and finalize.
+- `DELETE /api/admin/uploads/:id` — abort an open multipart upload.
+
+Kinds: `apk`, `icon`, `banner`, `screenshot`. Images are limited to 10 MiB and are signature-checked as PNG/JPEG/WebP. APKs default to 2 GiB; the R2 multipart API supports larger objects subject to the configured limit and Cloudflare service constraints. The legacy `POST /api/admin/apps` endpoint remains for compatibility but is capped at 16 MiB and is not used by the new UI.
+
+APK updates append an `app_versions` row and switch the app's current APK key only after successful completion. New apps remain drafts until media upload completes and the admin UI publishes them. Previous APK objects are retained for version history.
+
+## Download and subscription security
+
+- The R2 bucket must remain private; never attach a public URL to an APK object.
+- APK downloads stream through the Worker only after Telegram initData validation and successful `getChatMember` checks.
+- Telegram API failures deny the download (fail closed).
+- The bot must be an administrator in each required channel.
+- SHA-256 and ZIP structure signatures provide integrity/type checks, not a malware verdict or guarantee that an APK is safe to install.
+- Do not bypass subscription verification by exposing the R2 bucket.
+
+## Ads
+
+Active campaigns are returned from `GET /api/ads`. The Mini App marks ad cards as **Реклама** and records impression/click events. A D1 per-user/per-campaign daily counter caps impressions at three per day. Admins can create, enable, disable and remove campaigns.
+
+## Python Telegram bot
+
+The existing bot continues to use its own SQLite database at `data/apps.db`; this change does not migrate or merge that catalog with D1. Set `WEBAPP_URL` in the bot's private `.env` to the deployed HTTPS Mini App URL. The bot then displays an **Открыть APPNEST** Web App keyboard and supports `/open` and `/catalog`. Do not commit `.env`.
+
+## Tests
+
+From `worker`:
+
+```sh
+npm test
+python -m unittest discover -s test -p '*_test.py' -v
+```
+
+The GitHub Actions workflow also checks Worker/Mini App JavaScript syntax and compiles the Python bot. Mocked route tests cover health, Telegram initData, admin authorization, catalog/media behavior, CORS preflight and streaming SHA-256. Cloudflare live integration, Telegram Bot API membership, browser-on-Android, and real R2 multipart tests require configured services and are not executed by CI.
+
+## API route groups
+
+Public: `GET /api/health`, `GET /api/apps`, `GET /api/categories`.
+
+Authenticated: `GET/PATCH /api/me`, favorites, app versions, app downloads, ads/impressions/clicks, subscription status and feedback.
+
+Admin: app metadata/status/version history, multipart uploads, categories, channels and subscription mode, campaigns, users/blocking, notifications, feedback and audit events.
+
+No production deployment is performed by these instructions.

@@ -1,0 +1,84 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+import worker from "../src/index.js";
+
+const TOKEN = "123456:TEST_TOKEN_FOR_UNIT_TESTS_ONLY";
+class MockDB {
+  prepare(sql) {
+    return {
+      bind: (...args) => ({
+        first: async () => {
+          if (sql.includes("SELECT is_blocked")) return { is_blocked: 0 };
+          if (sql.includes("SELECT count FROM rate_limits")) return { count: 1 };
+          if (sql.includes("SELECT language FROM users")) return { language: "ru" };
+          if (sql.includes("COUNT(*)")) return { n: 0 };
+          return null;
+        },
+        all: async () => ({ results: [] }),
+        run: async () => ({ meta: { changes: 1, last_row_id: 1 } })
+      }),
+      first: async () => null,
+      all: async () => ({ results: [] }),
+      run: async () => ({ meta: { changes: 1, last_row_id: 1 } })
+    };
+  }
+}
+const env = () => ({ DB: new MockDB(), BOT_TOKEN: TOKEN, ADMIN_IDS: "42", ALLOWED_ORIGIN: "https://mini.example" });
+function signedInitData(userId = 42, ageSeconds = 0) {
+  const authDate = Math.floor(Date.now() / 1000) - ageSeconds;
+  const params = new URLSearchParams({
+    auth_date: String(authDate),
+    query_id: "AAE-test",
+    user: JSON.stringify({ id: userId, first_name: "Test", username: "tester" })
+  });
+  const check = [...params.entries()].sort(([a],[b]) => a.localeCompare(b)).map(([k,v]) => `${k}=${v}`).join("\n");
+  const secret = createHmac("sha256", "WebAppData").update(TOKEN).digest();
+  params.set("hash", createHmac("sha256", secret).update(check).digest("hex"));
+  return params.toString();
+}
+async function call(path, { method = "GET", initData, body, headers = {} } = {}) {
+  const h = new Headers(headers);
+  if (initData) h.set("X-Telegram-Init-Data", initData);
+  if (body !== undefined) { h.set("content-type", "application/json"); body = JSON.stringify(body); }
+  return worker.fetch(new Request("https://api.example/api" + path, { method, headers: h, body }), env());
+}
+
+test("health endpoint is available without Telegram session", async () => {
+  const response = await call("/health");
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).status, "online");
+});
+test("user routes reject missing or forged Telegram initData", async () => {
+  assert.equal((await call("/me")).status, 401);
+  assert.equal((await call("/me", { initData: "user=%7B%7D&hash=bad" })).status, 401);
+});
+test("admin routes reject missing session and non-admin users", async () => {
+  assert.equal((await call("/admin/overview")).status, 401);
+  assert.equal((await call("/admin/overview", { initData: signedInitData(7) })).status, 403);
+});
+test("valid Telegram initData authenticates and loads profile", async () => {
+  const response = await call("/me", { initData: signedInitData(42) });
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.equal(data.user.id, "42");
+  assert.equal(data.is_admin, true);
+  assert.equal(data.language, "ru");
+});
+test("stale Telegram initData is rejected", async () => {
+  assert.equal((await call("/me", { initData: signedInitData(42, 90000) })).status, 401);
+});
+test("public catalog uses parameterized D1 query", async () => {
+  const response = await call("/apps");
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).apps, []);
+});
+test("media route does not expose arbitrary R2 keys", async () => {
+  const response = await call("/media/private.apk");
+  assert.equal(response.status, 404);
+});
+test("preflight advertises Telegram auth header", async () => {
+  const response = await call("/health", { method: "OPTIONS", headers: { Origin: "https://mini.example" } });
+  assert.equal(response.status, 204);
+  assert.match(response.headers.get("access-control-allow-headers"), /X-Telegram-Init-Data/);
+});

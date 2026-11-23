@@ -388,7 +388,8 @@ test("Telegram getChatMember mock enforces all and any subscription modes", asyn
             run:async()=>({meta:{changes:1}})
           };},
           first:async()=>sql.includes("SELECT value FROM settings")?{value:mode}:null,
-          all:async()=>({results:[]}),run:async()=>({meta:{changes:1}})
+          all:async()=>({results:sql.includes("FROM required_channels")?channels:[]}),
+          run:async()=>({meta:{changes:1}})
         };}
       }
     };

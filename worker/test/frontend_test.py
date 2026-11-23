@@ -59,5 +59,17 @@ class MiniAppStaticAcceptanceTest(unittest.TestCase):
         self.assertIn("subscription_required", JS)
         self.assertIn("Проверить снова", JS)
 
+
+    def test_dynamic_categories_and_admin_audit_are_rendered(self):
+        self.assertIn('async function loadCategories()', JS)
+        self.assertIn('state.categories = Array.isArray(data.categories)', JS)
+        self.assertIn('data-extra-tab="audit"', JS)
+        self.assertIn('audit.events||[]', JS)
+        self.assertIn('data.downloads_by_day||[]', JS)
+
+    def test_upload_completion_retry_keeps_http_status(self):
+        self.assertIn('error.status = response.status', JS)
+        self.assertIn('if(error.status===404||error.status===410)', JS)
+
 if __name__ == "__main__":
     unittest.main()

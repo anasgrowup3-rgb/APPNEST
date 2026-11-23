@@ -31,7 +31,6 @@
   const initData = tg?.initData || "";
 
 
-  function hexDigest(buffer) { return [...new Uint8Array(buffer)].map(x=>x.toString(16).padStart(2,"0")).join(""); }
   function setUploadProgress(done,total,label="Загрузка") {
     const bar=$("#uploadProgress"),status=$("#uploadStatus");
     if(bar) bar.value=total?Math.min(100,Math.round(done/total*100)):0;
@@ -60,7 +59,7 @@
     try {
       for(let part=1;part<=count;part++){
         const chunk=file.slice((part-1)*chunkSize,Math.min(part*chunkSize,file.size));
-        let done=false,lastProgress=0,error;
+        let done=false,error;
         for(let attempt=0;attempt<3&&!done;attempt++){
           try {
             await sendUploadPart(init.upload_id,part,chunk,(loaded)=>{
@@ -556,7 +555,7 @@
       const result=await uploadFileMultipart(apk,"apk",{version:data.get("version"),version_code:Number(data.get("version_code")),min_android:data.get("min_android"),release_notes:data.get("release_notes"),metadata:{title:data.get("title"),description:data.get("description"),developer:data.get("developer"),category:data.get("category")}},setUploadProgress);
       const appId=result.app_id;
       for(const [file,kind] of [[icon,"icon"],[banner,"banner"],...screens.map(file=>[file,"screenshot"])]) {
-        if(file instanceof File&&file.size) await uploadFileMultipart(file,kind,{app_id:appId},()=>{});
+        if(file instanceof File&&file.size) await uploadFileMultipart(file,kind,{app_id:appId},setUploadProgress);
       }
       await request("/admin/apps/"+appId,{method:"PATCH",body:JSON.stringify({status:"published"})});
       closeModal();toast("Приложение загружено и опубликовано");
@@ -794,7 +793,7 @@
   $("#historyButton")?.addEventListener("click", () => navigate("history"));
   $("#addAppButton")?.addEventListener("click", adminAddAppForm);
 
-  $("#subscriptionMode")?.addEventListener("change",event=>request("/admin/subscription-mode",{method:"PUT",body:JSON.stringify({mode:event.target.value})}).catch(e=>toast(e.message)));
+  document.addEventListener("change",event=>{if(event.target.id==="subscriptionMode")request("/admin/subscription-mode",{method:"PUT",body:JSON.stringify({mode:event.target.value})}).catch(e=>toast(e.message));});
   $("#languageSelect")?.addEventListener("change", event => {
     setLanguage(event.target.value);
   });

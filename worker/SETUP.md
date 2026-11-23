@@ -10,9 +10,9 @@ Configure these on the existing Worker in the Cloudflare dashboard (or in the ex
 - R2 bucket binding **FILES** — private bucket only. Do not enable public development URLs or a public custom domain.
 - Secret **BOT_TOKEN** — Telegram bot token; never commit it.
 - Variable **ADMIN_IDS** — comma-separated numeric Telegram administrator IDs.
-- Variable **ALLOWED_ORIGIN** — exact HTTPS origin of the Mini App. Do not use `*` in production.
+- Variable **ALLOWED_ORIGIN** — one exact HTTPS origin of the Mini App. For more than one explicitly trusted frontend, use **ALLOWED_ORIGINS** as a comma-separated list; it takes precedence. Do not use `*` in production.
 - Optional **MAX_APK_BYTES** — maximum multipart APK size, default 2 GiB.
-- Optional **MAX_DIRECT_APK_BYTES** — legacy single-request upload limit, default 16 MiB.
+- Optional **MAX_DIRECT_APK_BYTES** — legacy single-request upload limit, default 16 MiB. The current Mini App uses resumable multipart uploads instead.
 - Optional **TELEGRAM_AUTH_MAX_AGE** — Telegram initData maximum age in seconds, default 86400.
 
 The repository's `worker/wrangler.jsonc` includes an hourly cleanup Cron trigger and deliberately does not contain fabricated D1 database IDs or R2 bucket names. Add the actual identifiers once the resources exist. The binding names must remain exactly `DB` and `FILES`.
@@ -71,7 +71,7 @@ npm test
 python -m unittest discover -s test -p '*_test.py' -v
 ```
 
-The GitHub Actions workflow also checks Worker/Mini App JavaScript syntax and compiles the Python bot. Mocked route tests cover health, Telegram initData, admin authorization, catalog/media behavior, CORS preflight and streaming SHA-256. Cloudflare live integration, Telegram Bot API membership, browser-on-Android, and real R2 multipart tests require configured services and are not executed by CI.
+The GitHub Actions workflow also checks Worker/Mini App JavaScript syntax and compiles the Python bot. Mocked route tests cover health, Telegram initData, admin authorization, catalog/media behavior, CORS preflight and allowlists, and streaming SHA-256. Frontend acceptance checks cover dynamic categories, admin audit/analytics rendering and upload retry behavior. Cloudflare live integration, Telegram Bot API membership, browser-on-Android, and real R2 multipart tests require configured services and are not executed by CI.
 
 ## API route groups
 

@@ -113,7 +113,7 @@ ok(await call(`/api/admin/uploads/${cancelled.data.upload_id}/parts?part_number=
 passed("real R2 multipart abort and closed-session enforcement");
 ok(await call(`/api/admin/uploads/${cancelled.data.upload_id}/parts?part_number=1`, { method: "PUT", raw: Buffer.from("12345678") }), 401, "multipart part upload rejects missing Telegram authorization");
 
-const apk = Buffer.alloc(8 * 1024 * 1024, 0x41);
+const apk = Buffer.alloc(9 * 1024 * 1024 + 123, 0x41);
 const badHashUpload = await call("/api/admin/uploads", {
   userId: adminId, method: "POST",
   body: { kind: "apk", filename: "checksum-failure.apk", size_bytes: apk.length, content_type: "application/vnd.android.package-archive", version: "0.0.2", version_code: 2, min_android: "7", sha256: "0".repeat(64), metadata: { title: "Checksum failure fixture", description: "Must never be published", category: categorySlug } }
@@ -135,16 +135,20 @@ const upload = await call("/api/admin/uploads", {
 });
 ok(upload, 201, "create R2 APK multipart upload");
 assert.equal(upload.data.part_size, 8388608);
+const partSize = 8 * 1024 * 1024;
+const partOne = apk.subarray(0, partSize);
+const partTwo = apk.subarray(partSize);
 const partPath = `/api/admin/uploads/${upload.data.upload_id}/parts?part_number=1`;
-ok(await call(partPath, { userId: adminId, method: "PUT", raw: apk }), 200, "upload 8 MiB R2 part");
-ok(await call(partPath, { userId: adminId, method: "PUT", raw: apk }), 200, "retry same R2 part");
+ok(await call(partPath, { userId: adminId, method: "PUT", raw: partOne }), 200, "upload first 8 MiB R2 part");
+ok(await call(partPath, { userId: adminId, method: "PUT", raw: partOne }), 200, "retry same R2 part");
+ok(await call(`/api/admin/uploads/${upload.data.upload_id}/parts?part_number=2`, { userId: adminId, method: "PUT", raw: partTwo }), 200, "upload final R2 part");
 const complete = await call(`/api/admin/uploads/${upload.data.upload_id}/complete`, { userId: adminId, method: "POST", body: {} });
 ok(complete, 200, "complete R2 multipart APK");
 assert.equal(complete.data.sha256, expectedSha, "server SHA-256 must match client digest");
 const appId = complete.data.app_id;
 assert.ok(appId);
 ok(await call(`/api/admin/apps/${appId}`, { userId: adminId, method: "PATCH", body: { status: "published" } }), 200, "publish isolated integration app");
-passed("R2 multipart retry/complete, ZIP signature and streaming SHA-256");
+passed("R2 two-part (9 MiB+) multipart retry/complete, ZIP signature and streaming SHA-256");
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pWQAAAAASUVORK5CYII=", "base64");
 const iconUpload = await call("/api/admin/uploads", {

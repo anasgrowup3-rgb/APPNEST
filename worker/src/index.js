@@ -212,10 +212,15 @@ async function handle(request, env) {
     }
     if (method === "DELETE") { await env.DB.prepare("DELETE FROM favorites WHERE user_id=? AND app_id=?").bind(userId,appId).run(); return json({success:true}); }
   }
-  if (path.startsWith("/apps/") && path.endsWith("/versions") && method === "GET") { const id=Number(path.split("/")[2]); const {results=[]}=await env.DB.prepare("SELECT version,version_code,min_android,size_bytes,release_notes,created_at FROM app_versions WHERE app_id=? ORDER BY version_code DESC LIMIT 30").bind(id).all(); return json({success:true,versions:results}); }
+  if (path.startsWith("/apps/") && path.endsWith("/versions") && method === "GET") {
+    const id=Number(path.split("/")[2]);
+    if(!Number.isSafeInteger(id)||id<1) return fail("Некорректное приложение");
+    const {results=[]}=await env.DB.prepare("SELECT v.version,v.version_code,v.min_android,v.size_bytes,v.release_notes,v.created_at FROM app_versions v JOIN apps a ON a.id=v.app_id WHERE v.app_id=? AND a.status='published' ORDER BY v.version_code DESC LIMIT 30").bind(id).all();
+    return json({success:true,versions:results});
+  }
   if (path.startsWith("/apps/") && path.endsWith("/download-ticket") && method === "POST") {
     const appId=Number(path.split("/")[2]);
-    const app=await env.DB.prepare("SELECT id FROM apps WHERE id=? AND status='published'").bind(appId).first();
+    const app=await env.DB.prepare("SELECT id,apk_key FROM apps WHERE id=? AND status='published' AND apk_key IS NOT NULL").bind(appId).first();
     if(!app) return fail("Приложение не найдено",404);
     const subs=await subscriptionCheck(env,userId);
     if(!subs.allowed) return json({success:false,error:subs.unavailable?"Не удалось проверить подписки. Повторите попытку позже.":"Для скачивания необходимо подписаться на каналы",subscription_required:true,mode:subs.unavailable?"unavailable":"required",channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed}))},403);
@@ -524,6 +529,7 @@ export default {
     try {
       const response = await handle(request,env);
       const headers = new Headers(response.headers);
+      headers.delete("access-control-allow-origin");
       for (const [k,v] of Object.entries(cors)) headers.set(k,v);
       if (request.method === "OPTIONS") return response;
       return new Response(response.body,{status:response.status,headers});

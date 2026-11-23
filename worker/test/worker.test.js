@@ -128,3 +128,40 @@ test("multipart upload creation rejects unauthenticated callers", async () => {
   const response = await call("/admin/uploads", { method: "POST", body: { kind: "apk", filename: "test.apk", size_bytes: 8, version: "1.0", version_code: 1 } });
   assert.equal(response.status, 401);
 });
+
+test("R2 multipart rejects a part whose size is not the required 8 MiB", async () => {
+  let partCalls=0;
+  const customEnv={
+    ...env(),
+    DB:{
+      prepare(sql){return{
+        bind(...args){return{
+          first:async()=>{
+            if(sql.includes("SELECT is_blocked"))return{is_blocked:0};
+            if(sql.includes("SELECT count FROM rate_limits"))return{count:1};
+            if(sql.includes("SELECT * FROM upload_sessions"))return{id:"upload-1",owner_id:"42",object_key:"apk/test.apk",r2_upload_id:"r2-id",expected_size:8388609,expires_at:Math.floor(Date.now()/1000)+600};
+            if(sql.includes("COALESCE(SUM(size_bytes)"))return{n:0};
+            return null;
+          },
+          all:async()=>({results:[]}),
+          run:async()=>({meta:{changes:1}})
+        };},
+        first:async()=>null,all:async()=>({results:[]}),run:async()=>({meta:{changes:1}})
+      };},
+    },
+    FILES:{resumeMultipartUpload(){return{uploadPart:async()=>{partCalls++;return{etag:"etag"};}};}}
+  };
+  const response=await call("/admin/uploads/upload-1/parts?part_number=1",{
+    method:"PUT",initData:signedInitData(42),body:new Uint8Array([1]),
+    headers:{"Content-Length":"1"},environment:customEnv
+  });
+  assert.equal(response.status,413);
+  assert.equal(partCalls,0);
+});
+test("admin campaign creation rejects invalid date strings", async () => {
+  const response=await call("/admin/ads",{
+    method:"POST",initData:signedInitData(42),
+    body:{title:"Test",kind:"banner",target_url:"https://example.com",starts_at:"not-a-date",ends_at:"also-not-a-date"}
+  });
+  assert.equal(response.status,400);
+});

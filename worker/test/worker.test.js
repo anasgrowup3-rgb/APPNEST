@@ -12,6 +12,7 @@ class MockDB {
           if (sql.includes("SELECT is_blocked")) return { is_blocked: 0 };
           if (sql.includes("SELECT count FROM rate_limits")) return { count: 1 };
           if (sql.includes("SELECT language FROM users")) return { language: "ru" };
+          if (sql.includes("SELECT id FROM apps WHERE id=? AND status='published'")) return { id: 1 };
           if (sql.includes("COUNT(*)")) return { n: 0 };
           return null;
         },
@@ -97,4 +98,18 @@ test("streaming SHA-256 handles multi-block payloads", async () => {
 test("download tickets are opaque, short-lived and one-time", async () => {
   const response = await call("/download/" + "a".repeat(64));
   assert.equal(response.status, 410);
+});
+
+test("authenticated user receives a short-lived download ticket, not an APK body", async () => {
+  const response = await call("/apps/1/download-ticket", { method: "POST", initData: signedInitData(42), body: {} });
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.match(data.url, /^\/api\/download\/[a-f0-9]{64}$/);
+  assert.ok(data.expires_at > Math.floor(Date.now() / 1000));
+  assert.ok(data.expires_at <= Math.floor(Date.now() / 1000) + 60);
+});
+test("user can persist one of the supported UI languages", async () => {
+  const response = await call("/me", { method: "PATCH", initData: signedInitData(42), body: { language: "tj" } });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).language, "tj");
 });

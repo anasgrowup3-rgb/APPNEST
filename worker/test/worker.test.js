@@ -41,7 +41,7 @@ function signedInitData(userId = 42, ageSeconds = 0) {
 async function call(path, { method = "GET", initData, body, rawBody, headers = {}, environment = env() } = {}) {
   const h = new Headers(headers);
   if (initData) h.set("X-Telegram-Init-Data", initData);
-  if (rawBody !== undefined) { h.set("content-type", "application/json"); body=rawBody; }
+  if (rawBody !== undefined) { h.set("content-type", typeof rawBody === "string" ? "application/json" : "application/octet-stream"); body=rawBody; }
   else if (body !== undefined) { h.set("content-type", "application/json"); body = JSON.stringify(body); }
   return worker.fetch(new Request("https://api.example/api" + path, { method, headers: h, body }), environment);
 }
@@ -338,7 +338,7 @@ test("multipart image upload streams a part, completes, and attaches media using
   assert.equal(create.status,201);
   const uploadId=(await create.json()).upload_id;
   const part=await call("/admin/uploads/"+uploadId+"/parts?part_number=1",{
-    method:"PUT",initData:signedInitData(42),environment,body:png,
+    method:"PUT",initData:signedInitData(42),environment,rawBody:png,
     headers:{"Content-Length":String(png.length)}
   });
   assert.equal(part.status,200);

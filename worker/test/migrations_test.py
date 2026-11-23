@@ -60,8 +60,8 @@ class MigrationSmokeTest(unittest.TestCase):
             VALUES(?,?,?,?,?)
         """, (app_id,"1.0",8,"apk/fixture.apk","a" * 64))
         self.db.execute("""
-            INSERT INTO upload_sessions(id,owner_id,app_id,object_key,r2_upload_id,expected_size,expires_at)
-            VALUES('upload-1','42',?,'apk/new.apk','r2-id',8,9999999999)
+            INSERT INTO upload_sessions(id,owner_id,app_id,object_key,r2_upload_id,metadata_json,expected_size,expires_at)
+            VALUES('upload-1','42',?,'apk/new.apk','r2-id','{}',8,9999999999)
         """, (app_id,))
         self.db.execute("""
             INSERT INTO upload_parts(upload_id,part_number,etag,size_bytes)

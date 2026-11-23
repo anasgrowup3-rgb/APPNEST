@@ -535,20 +535,30 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
 
   async function submitApp(form) {
     const data=new FormData(form),apk=data.get("apk"),icon=data.get("icon"),banner=data.get("banner"),screens=[...(data.getAll("screenshots")||[])].filter(x=>x instanceof File&&x.size);
-    const button=form.querySelector('button[type="submit"]'); if(button)button.disabled=true;
-    const status=$("#uploadStatus"); if(status)status.hidden=false;
-    try {
-      if(!(apk instanceof File)||!apk.size) throw new Error("Выберите APK-файл");
-      const result=await uploadFileMultipart(apk,"apk",{version:data.get("version"),version_code:Number(data.get("version_code")),min_android:data.get("min_android"),release_notes:data.get("release_notes"),metadata:{title:data.get("title"),description:data.get("description"),developer:data.get("developer"),category:data.get("category")}},setUploadProgress);
-      const appId=result.app_id;
-      for(const [file,kind] of [[icon,"icon"],[banner,"banner"],...screens.map(file=>[file,"screenshot"])]) {
-        if(file instanceof File&&file.size) await uploadFileMultipart(file,kind,{app_id:appId},setUploadProgress);
+    const button=form.querySelector('button[type="submit"]');if(button)button.disabled=true;
+    const status=$("#uploadStatus");if(status)status.hidden=false;
+    try{
+      if(!form.dataset.appId){
+        if(!(apk instanceof File)||!apk.size)throw new Error("Выберите APK-файл");
+        const result=await uploadFileMultipart(apk,"apk",{version:data.get("version"),version_code:Number(data.get("version_code")),min_android:data.get("min_android"),release_notes:data.get("release_notes"),metadata:{title:data.get("title"),description:data.get("description"),developer:data.get("developer"),category:data.get("category")}},setUploadProgress);
+        form.dataset.appId=String(result.app_id);
       }
-      await request("/admin/apps/"+appId,{method:"PATCH",body:JSON.stringify({status:"published"})});
+      const appId=Number(form.dataset.appId);
+      const media=[[icon,"icon"],[banner,"banner"],...screens.map(file=>[file,"screenshot"])];
+      let next=Number(form.dataset.mediaIndex)||0;
+      for(;next<media.length;next++){
+        const [file,kind]=media[next];
+        if(file instanceof File&&file.size)await uploadFileMultipart(file,kind,{app_id:appId},setUploadProgress);
+        form.dataset.mediaIndex=String(next+1);
+      }
+      if(!form.dataset.published){
+        await request("/admin/apps/"+appId,{method:"PATCH",body:JSON.stringify({status:"published"})});
+        form.dataset.published="1";
+      }
       closeModal();toast("Приложение загружено и опубликовано");
       await loadApps();await loadAdmin();
-    } catch(error) {
-      if(status)status.textContent="Ошибка: "+error.message+" · Проверьте сеть и нажмите «Повторить»";
+    }catch(error){
+      if(status)status.textContent="Ошибка: "+error.message+" · Повторите загрузку — завершённые этапы будут пропущены";
       if(button){button.disabled=false;button.textContent="Повторить загрузку";}
       toast(error.message||"Ошибка загрузки");
     }
@@ -850,7 +860,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
     }
 
     const form=event.target;
-    if(form.id==="editAppForm"){event.preventDefault();const data=new FormData(form),appId=Number(form.dataset.appId),payload={title:data.get("title"),description:data.get("description"),category:data.get("category"),developer:data.get("developer")},button=form.querySelector("button");button.disabled=true;const status=$("#uploadStatus");if(status)status.hidden=false;request("/admin/apps/"+appId,{method:"PATCH",body:JSON.stringify(payload)}).then(async()=>{for(const [file,kind] of [[data.get("icon"),"icon"],[data.get("banner"),"banner"],...[...(data.getAll("screenshots")||[])].map(file=>[file,"screenshot"])])if(file instanceof File&&file.size)await uploadFileMultipart(file,kind,{app_id:appId},setUploadProgress);closeModal();toast("Изменения сохранены");await loadAdmin();await loadApps();}).catch(e=>{if(status)status.textContent="Ошибка: "+e.message+" · Повторите сохранение";button.disabled=false;toast(e.message);});}
+    if(form.id==="editAppForm"){event.preventDefault();const data=new FormData(form),appId=Number(form.dataset.appId),payload={title:data.get("title"),description:data.get("description"),category:data.get("category"),developer:data.get("developer")},button=form.querySelector("button");button.disabled=true;const status=$("#uploadStatus");if(status)status.hidden=false;(async()=>{if(!form.dataset.metadataSaved){await request("/admin/apps/"+appId,{method:"PATCH",body:JSON.stringify(payload)});form.dataset.metadataSaved="1";}const media=[[data.get("icon"),"icon"],[data.get("banner"),"banner"],...[...(data.getAll("screenshots")||[])].map(file=>[file,"screenshot"])];let next=Number(form.dataset.mediaIndex)||0;for(;next<media.length;next++){const [file,kind]=media[next];if(file instanceof File&&file.size)await uploadFileMultipart(file,kind,{app_id:appId},setUploadProgress);form.dataset.mediaIndex=String(next+1);}closeModal();toast("Изменения сохранены");await loadAdmin();await loadApps();})().catch(e=>{if(status)status.textContent="Ошибка: "+e.message+" · Повторите сохранение — завершённые этапы будут пропущены";button.disabled=false;toast(e.message);});}
     if(form.id==="updateApkForm"){event.preventDefault();const d=new FormData(form),file=d.get("apk"),button=form.querySelector("button");button.disabled=true;const status=$("#uploadStatus");status.hidden=false;uploadFileMultipart(file,"apk",{app_id:Number(form.dataset.appId),version:d.get("version"),version_code:Number(d.get("version_code")),min_android:d.get("min_android"),release_notes:d.get("release_notes")},setUploadProgress).then(()=>{closeModal();toast("Обновление загружено");loadAdmin();loadApps();}).catch(e=>{status.textContent="Ошибка: "+e.message+" · Нажмите повторить";button.disabled=false;button.textContent="Повторить загрузку";toast(e.message);});}
     if(form.id==="categoryForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/categories",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
     if(form.id==="channelForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/channels",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}

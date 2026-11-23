@@ -1,18 +1,263 @@
+const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
+const MAX_JSON = 64 * 1024;
+const encoder = new TextEncoder();
+
+function json(data, status = 200, headers = {}) {
+  return new Response(JSON.stringify(data), { status, headers: { ...JSON_HEADERS, ...headers } });
+}
+function fail(message, status = 400) { return json({ success: false, error: message }, status); }
+function clean(value, max = 5000) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
+function hex(buffer) { return [...new Uint8Array(buffer)].map(x => x.toString(16).padStart(2, "0")).join(""); }
+function constantTimeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+async function hmac(key, data) {
+  const imported = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", imported, data));
+}
+async function verifyTelegram(initData, token, maxAge = 86400) {
+  if (!initData || !token || initData.length > 8192) return null;
+  const params = new URLSearchParams(initData);
+  const hash = params.get("hash");
+  const authDate = Number(params.get("auth_date"));
+  if (!hash || !/^[a-f0-9]{64}$/i.test(hash) || !Number.isInteger(authDate)) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (authDate > now + 60 || now - authDate > maxAge) return null;
+  params.delete("hash");
+  const check = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k,v]) => `${k}=${v}`).join("\n");
+  const secret = await hmac(encoder.encode("WebAppData"), encoder.encode(token));
+  const expected = hex(await hmac(secret, encoder.encode(check)));
+  if (!constantTimeEqual(expected, hash.toLowerCase())) return null;
+  try {
+    const user = JSON.parse(params.get("user") || "null");
+    if (!user || !Number.isSafeInteger(Number(user.id))) return null;
+    return { id: String(user.id), username: clean(user.username, 64), first_name: clean(user.first_name, 128), last_name: clean(user.last_name, 128), photo_url: clean(user.photo_url, 1024) };
+  } catch { return null; }
+}
+async function readJson(request) {
+  const length = Number(request.headers.get("content-length") || 0);
+  if (length > MAX_JSON) throw new Error("Слишком большой запрос");
+  return await request.json();
+}
+async function rateLimit(env, key, limit = 60, windowSeconds = 60) {
+  if (!env.DB) return false;
+  const bucket = Math.floor(Date.now() / 1000 / windowSeconds);
+  const id = `${key}:${bucket}`;
+  await env.DB.prepare("INSERT INTO rate_limits (key, count, expires_at) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET count=count+1").bind(id, (bucket + 2) * windowSeconds).run();
+  const row = await env.DB.prepare("SELECT count FROM rate_limits WHERE key=?").bind(id).first();
+  if (bucket % 10 === 0) await env.DB.prepare("DELETE FROM rate_limits WHERE expires_at < ?").bind(Math.floor(Date.now()/1000)).run();
+  return (row?.count || 0) > limit;
+}
+async function auth(request, env) {
+  const raw = request.headers.get("X-Telegram-Init-Data") || "";
+  const user = await verifyTelegram(raw, env.BOT_TOKEN, Number(env.TELEGRAM_AUTH_MAX_AGE || 86400));
+  if (!user) return { error: fail("Требуется действительная авторизация Telegram", 401) };
+  if (await rateLimit(env, "user:" + user.id, 120)) return { error: fail("Слишком много запросов", 429) };
+  const blocked = await env.DB.prepare("SELECT is_blocked FROM users WHERE telegram_id=?").bind(user.id).first();
+  if (blocked?.is_blocked) return { error: fail("Доступ к сервису ограничен", 403) };
+  await env.DB.prepare("INSERT INTO users (telegram_id, username, first_name, last_name, photo_url, last_seen) VALUES (?, ?, ?, ?, ?, datetime('now')) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, last_name=excluded.last_name, photo_url=excluded.photo_url, last_seen=datetime('now')").bind(user.id,user.username,user.first_name,user.last_name,user.photo_url).run();
+  const adminIds = (env.ADMIN_IDS || "").split(",").map(x => x.trim()).filter(Boolean);
+  return { user, isAdmin: adminIds.includes(user.id) };
+}
+async function adminAuth(request, env) {
+  const session = await auth(request, env);
+  if (session.error) return session;
+  if (!session.isAdmin) return { error: fail("Недостаточно прав", 403) };
+  return session;
+}
+async function audit(env, actor, action, target, details = "") {
+  await env.DB.prepare("INSERT INTO admin_audit (actor_id, action, target, details) VALUES (?, ?, ?, ?)").bind(actor, action, target, clean(details, 1000)).run();
+}
+async function subscriptionCheck(env, userId) {
+  const { results = [] } = await env.DB.prepare("SELECT chat_id, title, invite_url FROM required_channels WHERE enabled=1").all();
+  if (!results.length) return { allowed: true, channels: [] };
+  if (!env.BOT_TOKEN) return { allowed: false, unavailable: true, channels: results };
+  const checks = await Promise.all(results.map(async channel => {
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getChatMember`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: channel.chat_id, user_id: Number(userId) })
+      });
+      if (!response.ok) throw new Error("Telegram unavailable");
+      const payload = await response.json();
+      if (!payload.ok) throw new Error("Telegram unavailable");
+      const status = payload.result?.status;
+      return { ...channel, subscribed: ["creator","administrator","member"].includes(status) || (status === "restricted" && payload.result?.is_member === true) };
+    } catch { return { ...channel, subscribed: false, unavailable: true }; }
+  }));
+  const mode = await env.DB.prepare("SELECT value FROM settings WHERE key='subscription_mode'").first();
+  const any = mode?.value === "any";
+  const unavailable = checks.some(x => x.unavailable);
+  const allowed = !unavailable && (any ? checks.some(x => x.subscribed) : checks.every(x => x.subscribed));
+  return { allowed, unavailable, channels: checks };
+}
+async function logDownload(env, userId, appId) {
+  await env.DB.prepare("INSERT INTO downloads (user_id, app_id) VALUES (?, ?)").bind(userId, appId).run();
+  await env.DB.prepare("UPDATE apps SET downloads=downloads+1 WHERE id=?").bind(appId).run();
+}
+async function handle(request, env) {
+  if (!env.DB) return fail("D1 binding DB не настроен", 503);
+  const url = new URL(request.url);
+  const path = url.pathname.replace(/^\/api/, "").replace(/\/$/, "") || "/";
+  const method = request.method;
+  if (method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": env.ALLOWED_ORIGIN || "*", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS", "access-control-allow-headers": "Content-Type,X-Telegram-Init-Data", "access-control-max-age": "86400" } });
+  if (path === "/health" && method === "GET") return json({ success: true, service: "APPNEST API", status: "online", storage: !!env.FILES });
+  if (path === "/apps" && method === "GET") {
+    const category = clean(url.searchParams.get("category"), 80);
+    const query = clean(url.searchParams.get("q"), 100);
+    let sql = "SELECT id,title,description,developer,category,version,version_code,min_android,size_bytes,icon_key,banner_key,screenshots_json,downloads,created_at,updated_at FROM apps WHERE status='published'";
+    const args = [];
+    if (category) { sql += " AND category=?"; args.push(category); }
+    if (query) { sql += " AND (title LIKE ? OR description LIKE ? OR developer LIKE ?)"; args.push("%"+query+"%","%"+query+"%","%"+query+"%"); }
+    sql += " ORDER BY created_at DESC LIMIT 100";
+    const { results = [] } = await env.DB.prepare(sql).bind(...args).all();
+    return json({ success: true, apps: results.map(a => ({ ...a, size: a.size_bytes ? (a.size_bytes / 1048576).toFixed(1) + " MB" : null, icon_url: a.icon_key ? "/api/media/" + encodeURIComponent(a.icon_key) : null, screenshots: safeArray(a.screenshots_json) })) });
+  }
+  if (path.startsWith("/media/") && method === "GET") {
+    if (!env.FILES) return fail("R2 binding FILES не настроен", 503);
+    const key = decodeURIComponent(path.slice(7));
+    const row = await env.DB.prepare("SELECT id FROM apps WHERE status='published' AND (icon_key=? OR banner_key=? OR instr(screenshots_json, ?) > 0)").bind(key,key,key).first();
+    if (!row) return fail("Файл не найден", 404);
+    const object = await env.FILES.get(key);
+    if (!object) return fail("Файл не найден", 404);
+    return new Response(object.body, { headers: { "content-type": object.httpMetadata?.contentType || "application/octet-stream", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" } });
+  }
+  const session = await auth(request, env);
+  if (session.error) return session.error;
+  const userId = session.user.id;
+  if (path === "/me" && method === "GET") {
+    const [favs, history, notes] = await Promise.all([
+      env.DB.prepare("SELECT app_id FROM favorites WHERE user_id=?").bind(userId).all(),
+      env.DB.prepare("SELECT d.app_id,a.title,d.created_at FROM downloads d JOIN apps a ON a.id=d.app_id WHERE d.user_id=? ORDER BY d.created_at DESC LIMIT 100").bind(userId).all(),
+      env.DB.prepare("SELECT id,title,message,created_at FROM notifications WHERE active=1 ORDER BY created_at DESC LIMIT 30").all()
+    ]);
+    return json({ success:true, user:session.user, is_admin:session.isAdmin, favorites:(favs.results||[]).map(x=>String(x.app_id)), history:history.results||[], notifications:notes.results||[] });
+  }
+  if (path.startsWith("/favorites/")) {
+    const appId = Number(path.split("/")[2]);
+    if (!Number.isSafeInteger(appId) || appId < 1) return fail("Некорректное приложение");
+    if (method === "POST") {
+      await env.DB.prepare("INSERT OR IGNORE INTO favorites(user_id,app_id) SELECT ?,id FROM apps WHERE id=? AND status='published'").bind(userId,appId).run();
+      return json({ success:true });
+    }
+    if (method === "DELETE") { await env.DB.prepare("DELETE FROM favorites WHERE user_id=? AND app_id=?").bind(userId,appId).run(); return json({success:true}); }
+  }
+  if (path.startsWith("/apps/") && path.endsWith("/download") && method === "POST") {
+    const appId = Number(path.split("/")[2]);
+    const app = await env.DB.prepare("SELECT id,apk_key,apk_sha256,title FROM apps WHERE id=? AND status='published'").bind(appId).first();
+    if (!app || !app.apk_key) return fail("Приложение не найдено",404);
+    const subs = await subscriptionCheck(env,userId);
+    if (!subs.allowed) return json({ success:false, error:subs.unavailable ? "Не удалось проверить подписки. Повторите попытку позже." : "Для скачивания необходимо подписаться на каналы", subscription_required:true, mode:subs.unavailable ? "unavailable" : "required", channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed})) },403);
+    if (!env.FILES) return fail("R2 binding FILES не настроен",503);
+    const object = await env.FILES.get(app.apk_key);
+    if (!object) return fail("APK-файл временно недоступен",404);
+    await logDownload(env,userId,appId);
+    return new Response(object.body,{headers:{"content-type":"application/vnd.android.package-archive","content-disposition":`attachment; filename="${app.id}.apk"`,"content-length":String(object.size),"x-content-type-options":"nosniff","cache-control":"private, no-store","etag":object.httpEtag || ""}});
+  }
+  if (path === "/feedback" && method === "POST") {
+    const body = await readJson(request); const message = clean(body.message,2000);
+    if (message.length < 3) return fail("Сообщение слишком короткое");
+    await env.DB.prepare("INSERT INTO feedback(user_id,message) VALUES (?,?)").bind(userId,message).run();
+    return json({success:true},201);
+  }
+  if (path.startsWith("/ads/") && path.endsWith("/impression") && method === "POST") {
+    const id=Number(path.split("/")[2]); await env.DB.prepare("UPDATE ad_campaigns SET impressions=impressions+1 WHERE id=? AND active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now')").bind(id).run(); return json({success:true});
+  }
+  if (path.startsWith("/ads/") && path.endsWith("/click") && method === "POST") {
+    const id=Number(path.split("/")[2]); await env.DB.prepare("UPDATE ad_campaigns SET clicks=clicks+1 WHERE id=? AND active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now')").bind(id).run(); return json({success:true});
+  }
+  if (path === "/ads" && method === "GET") {
+    const {results=[]}=await env.DB.prepare("SELECT id,title,kind,creative_url,target_url FROM ad_campaigns WHERE active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now') ORDER BY priority DESC LIMIT 5").all(); return json({success:true,ads:results});
+  }
+  if (path === "/subscription/status" && method === "GET") return json({success:true,...await subscriptionCheck(env,userId)});
+  if (path.startsWith("/admin/")) {
+    const admin = await adminAuth(request,env); if(admin.error) return admin.error;
+    if (path === "/admin/overview" && method === "GET") {
+      const [apps,users,downloads,feedback,allApps,ads,channels] = await Promise.all([
+        env.DB.prepare("SELECT COUNT(*) n FROM apps WHERE status='published'").first(),
+        env.DB.prepare("SELECT COUNT(*) n FROM users").first(),
+        env.DB.prepare("SELECT COUNT(*) n FROM downloads").first(),
+        env.DB.prepare("SELECT id,user_id,message,created_at FROM feedback WHERE status='open' ORDER BY created_at DESC LIMIT 50").all(),
+        env.DB.prepare("SELECT id,title,description,category,version,downloads,status FROM apps ORDER BY created_at DESC LIMIT 100").all(),
+        env.DB.prepare("SELECT id,title,kind,active,starts_at,ends_at,impressions,clicks FROM ad_campaigns ORDER BY id DESC LIMIT 50").all(),
+        env.DB.prepare("SELECT id,chat_id,title,invite_url,enabled FROM required_channels ORDER BY id").all()
+      ]);
+      return json({success:true,apps_count:apps.n,users_count:users.n,downloads_count:downloads.n,feedback:feedback.results,apps:allApps.results,ads:ads.results,channels:channels.results});
+    }
+    if (path === "/admin/apps" && method === "POST") {
+      const form=await request.formData(); const title=clean(form.get("title"),100), description=clean(form.get("description"),5000), developer=clean(form.get("developer"),120), category=clean(form.get("category"),80), version=clean(form.get("version"),40), minAndroid=clean(form.get("min_android"),40);
+      const apk=form.get("apk"), icon=form.get("icon");
+      if(!title || !description || !category || !(apk instanceof File) || apk.size<8 || !apk.name.toLowerCase().endsWith(".apk")) return fail("Укажите название, описание, категорию и корректный APK");
+      if(apk.size>Number(env.MAX_APK_BYTES || 1073741824)) return fail("APK превышает настроенный лимит",413);
+      const head=new Uint8Array(await apk.slice(0,4).arrayBuffer()); if(head[0]!==0x50 || head[1]!==0x4b) return fail("APK не имеет ZIP-сигнатуру");
+      if(!env.FILES) return fail("R2 binding FILES не настроен",503);
+      const bytes=await apk.arrayBuffer(); const digest=hex(await crypto.subtle.digest("SHA-256",bytes)); const key="apk/"+crypto.randomUUID()+".apk";
+      await env.FILES.put(key,bytes,{httpMetadata:{contentType:"application/vnd.android.package-archive"}});
+      let iconKey=null;
+      if(icon instanceof File && icon.size>0) { if(icon.size>2*1024*1024 || !/^image\/(png|jpeg|webp)$/.test(icon.type)) { await env.FILES.delete(key); return fail("Недопустимая иконка"); } iconKey="icons/"+crypto.randomUUID(); await env.FILES.put(iconKey,await icon.arrayBuffer(),{httpMetadata:{contentType:icon.type}}); }
+      try {
+        const inserted=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,min_android,size_bytes,apk_key,apk_sha256,icon_key,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,version,minAndroid,apk.size,key,digest,iconKey,"published",userId).run();
+        const id=inserted.meta.last_row_id; await audit(env,userId,"app.create",String(id),`sha256=${digest}`); return json({success:true,id,sha256:digest,size_bytes:apk.size},201);
+      } catch(error) { await env.FILES.delete(key); if(iconKey) await env.FILES.delete(iconKey); throw error; }
+    }
+    if (path.startsWith("/admin/apps/") && method === "PATCH") {
+      const id=Number(path.split("/")[3]); const body=await readJson(request);
+      const fields={title:"title",description:"description",developer:"developer",category:"category",version:"version",min_android:"min_android",status:"status"};
+      const sets=[],values=[];
+      for(const [key,col] of Object.entries(fields)) if(body[key]!==undefined){ const value=clean(body[key],key==="description"?5000:200); if(key==="status"&&!["draft","published","archived"].includes(value)) return fail("Недопустимый статус"); sets.push(col+"=?"); values.push(value); }
+      if(!sets.length) return fail("Нет изменений");
+      values.push(id); await env.DB.prepare("UPDATE apps SET "+sets.join(",")+",updated_at=datetime('now') WHERE id=?").bind(...values).run(); await audit(env,userId,"app.update",String(id)); return json({success:true});
+    }
+    if (path === "/admin/channels" && method === "POST") {
+      const b=await readJson(request); const chatId=clean(String(b.chat_id||""),120),title=clean(b.title,120),invite=clean(b.invite_url,500);
+      if(!chatId||!title||!/^https:\/\/(t\.me|telegram\.me)\//.test(invite)) return fail("Проверьте chat_id, название и ссылку канала");
+      await env.DB.prepare("INSERT INTO required_channels(chat_id,title,invite_url,enabled) VALUES(?,?,?,1)").bind(chatId,title,invite).run(); await audit(env,userId,"channel.create",chatId); return json({success:true},201);
+    }
+    if (path === "/admin/subscription-mode" && method === "PUT") {
+      const b=await readJson(request); if(!["all","any"].includes(b.mode)) return fail("Режим должен быть all или any");
+      await env.DB.prepare("INSERT INTO settings(key,value) VALUES('subscription_mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(b.mode).run(); await audit(env,userId,"subscription.mode",b.mode); return json({success:true});
+    }
+    if (path === "/admin/ads" && method === "POST") {
+      const b=await readJson(request); const title=clean(b.title,120),kind=clean(b.kind,40),creative=clean(b.creative_url,1000),target=clean(b.target_url,1000),starts=clean(b.starts_at,40),ends=clean(b.ends_at,40);
+      if(!title||!["banner","channel","task"].includes(kind)||!/^https:\/\//.test(target)||!starts||!ends||new Date(starts)>=new Date(ends)) return fail("Некорректные параметры кампании");
+      await env.DB.prepare("INSERT INTO ad_campaigns(title,kind,creative_url,target_url,starts_at,ends_at,active,priority) VALUES(?,?,?,?,?,?,?,?)").bind(title,kind,creative,target,starts,ends,b.active===false?0:1,Number(b.priority)||0).run(); await audit(env,userId,"ad.create",title); return json({success:true},201);
+    }
+    if (path.startsWith("/admin/users/") && method === "PATCH") {
+      const id=path.split("/")[3]; const b=await readJson(request); if(!/^\d+$/.test(id)||typeof b.blocked!=="boolean") return fail("Некорректные данные");
+      await env.DB.prepare("UPDATE users SET is_blocked=? WHERE telegram_id=?").bind(b.blocked?1:0,id).run(); await audit(env,userId,b.blocked?"user.block":"user.unblock",id); return json({success:true});
+    }
+    if (path === "/admin/notifications" && method === "POST") {
+      const b=await readJson(request); const title=clean(b.title,120),message=clean(b.message,2000); if(!title||!message) return fail("Заполните заголовок и сообщение");
+      await env.DB.prepare("INSERT INTO notifications(title,message,active) VALUES(?,?,1)").bind(title,message).run(); await audit(env,userId,"notification.create",title); return json({success:true},201);
+    }
+    if (path === "/admin/feedback" && method === "GET") {
+      const {results=[]}=await env.DB.prepare("SELECT * FROM feedback ORDER BY created_at DESC LIMIT 200").all(); return json({success:true,feedback:results});
+    }
+    if (path === "/admin/audit" && method === "GET") {
+      const {results=[]}=await env.DB.prepare("SELECT actor_id,action,target,details,created_at FROM admin_audit ORDER BY id DESC LIMIT 200").all(); return json({success:true,events:results});
+    }
+    return fail("Endpoint not found",404);
+  }
+  return fail("Endpoint not found",404);
+}
+function safeArray(value) { try { const x=JSON.parse(value||"[]"); return Array.isArray(x)?x:[]; } catch { return []; } }
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/api/health") {
-      return Response.json({
-        success: true,
-        service: "APPNEST API",
-        status: "online"
-      });
+    const origin = request.headers.get("Origin");
+    const allowed = env.ALLOWED_ORIGIN || "*";
+    const cors = { "access-control-allow-origin": allowed === "*" ? "*" : (origin === allowed ? origin : allowed), "vary": "Origin" };
+    try {
+      const response = await handle(request,env);
+      const headers = new Headers(response.headers);
+      for (const [k,v] of Object.entries(cors)) headers.set(k,v);
+      if (request.method === "OPTIONS") return response;
+      return new Response(response.body,{status:response.status,headers});
+    } catch (error) {
+      console.error("APPNEST API error:", error?.message || "internal error");
+      return fail("Внутренняя ошибка сервера",500);
     }
-
-    return Response.json({
-      success: false,
-      error: "Endpoint not found"
-    }, { status: 404 });
   }
 };

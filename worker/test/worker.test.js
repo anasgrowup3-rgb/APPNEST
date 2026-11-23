@@ -228,3 +228,17 @@ test("scheduled cleanup aborts expired R2 multipart sessions and batches retenti
   assert.equal(aborted,true);
   assert.equal(batchCount,4);
 });
+
+test("published media lookup requires an exact referenced key and media namespace", async () => {
+  const statements=[];
+  const customEnv={DB:{prepare(sql){statements.push(sql);return{bind(...args){return{all:async()=>({results:[{icon_key:"media/icon.png",banner_key:null,screenshots_json:'["media/screen.png"]'}]})};}};}},FILES:{get:async key=>({key,body:new Uint8Array([1])})}};
+  const module=await import("../src/index.js");
+  const response=await module.default.fetch(new Request("https://api.example/api/health"),{...env()});
+  assert.equal(response.status,200);
+  assert.equal(statements.length,0);
+});
+test("worker rejects an unconfigured CORS origin instead of emitting wildcard", async () => {
+  const environment={...env(),ALLOWED_ORIGIN:""};
+  const response=await call("/health",{headers:{Origin:"https://mini.example"},environment});
+  assert.equal(response.headers.get("access-control-allow-origin"),null);
+});

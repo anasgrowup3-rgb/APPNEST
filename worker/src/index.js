@@ -689,6 +689,7 @@ async function cleanupExpired(env) {
   }
   await env.DB.batch([
     env.DB.prepare("DELETE FROM appnest_download_tokens WHERE expires_at<? OR used_at IS NOT NULL").bind(now),
+    env.DB.prepare("DELETE FROM appnest_auth_sessions WHERE expires_at<?").bind(now),
     env.DB.prepare("DELETE FROM appnest_rate_limits WHERE expires_at<?").bind(now),
     env.DB.prepare("DELETE FROM appnest_ad_frequency WHERE day<date('now','-90 days')"),
     env.DB.prepare("DELETE FROM appnest_upload_sessions WHERE status IN ('completed','aborted','failed') AND created_at<datetime('now','-30 days')")

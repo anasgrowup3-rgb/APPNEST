@@ -577,6 +577,14 @@
     $("#downloadCount") && ($("#downloadCount").textContent = state.history.length);
     $("#adminEntry") && ($("#adminEntry").hidden = !state.isAdmin);
     const about=$("#page-profile .about-block");
+    if(about && new URLSearchParams(window.location.search).get("admin")==="1" && !$("#adminRecoveryAccessButton")){
+      const access=document.createElement("button");
+      access.id="adminRecoveryAccessButton";
+      access.type="button";
+      access.textContent="Войти в админ-панель по резервному коду";
+      access.style.cssText="display:block;width:100%;margin-top:14px;border:1px solid rgba(169,156,255,.45);border-radius:12px;padding:13px;background:rgba(149,101,255,.12);color:#c8bcff;font-weight:700";
+      about.append(access);
+    }
     if(about && !$("#logoutButton")){const out=document.createElement("button");out.id="logoutButton";out.type="button";out.textContent="Выйти из аккаунта";about.append(out);}
   }
 
@@ -924,6 +932,17 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
   }
 
   document.addEventListener("click", event => {
+    if(event.target.closest("#adminRecoveryAccessButton")){
+      const code=prompt("Введите одноразовый резервный код главного администратора");
+      if(!code)return;
+      const button=$("#adminRecoveryAccessButton");
+      if(button)button.disabled=true;
+      request("/auth/admin-recovery",{method:"POST",body:JSON.stringify({code})})
+        .then(async()=>{await loadProfileData();if(state.isAdmin){navigate("admin");window.history.replaceState({},"",window.location.pathname);toast("Вход администратора выполнен");}else{throw new Error("Права администратора не подтверждены");}})
+        .catch(error=>toast(error.message||"Не удалось войти в админ-панель"))
+        .finally(()=>{if(button)button.disabled=false;});
+      return;
+    }
     if(event.target.closest("#logoutButton")){logoutAccount();return;}
     const pageButton = event.target.closest("[data-page]");
     if (pageButton) {

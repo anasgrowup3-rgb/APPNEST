@@ -170,7 +170,12 @@ async function rateLimit(env, key, limit = 60, windowSeconds = 60) {
 }
 async function auth(request, env) {
   const cookie=cookieValue(request,"appnest_session");
-  if(cookie){
+  // A cryptographically verified Telegram initData of a configured administrator always wins over a
+  // pre-existing (e.g. guest) cookie session: this is the original "open the bot as admin" login.
+  const rawInitData=request.headers.get("X-Telegram-Init-Data")||"";
+  const telegramUser=rawInitData?await verifyTelegram(rawInitData,env.BOT_TOKEN,Number(env.TELEGRAM_AUTH_MAX_AGE||86400)):null;
+  const telegramAdmin=!!(telegramUser&&await webAdmin(env,telegramUser.id));
+  if(cookie&&!telegramAdmin){
     const tokenHash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(cookie)));
     const row=await env.DB.prepare("SELECT user_id,expires_at FROM appnest_auth_sessions WHERE token_hash=?").bind(tokenHash).first();
     if(row&&row.expires_at>Math.floor(Date.now()/1000)){
@@ -183,8 +188,7 @@ async function auth(request, env) {
     }
     if(row)await env.DB.prepare("DELETE FROM appnest_auth_sessions WHERE token_hash=?").bind(tokenHash).run();
   }
-  const raw=request.headers.get("X-Telegram-Init-Data")||"";
-  const user=await verifyTelegram(raw,env.BOT_TOKEN,Number(env.TELEGRAM_AUTH_MAX_AGE||86400));
+  const user=telegramUser;
   if(!user)return {error:fail("Войдите в APPNEST по почте и паролю",401)};
   const uploadPartRequest=new URL(request.url).pathname.startsWith("/api/admin/uploads/")&&new URL(request.url).pathname.endsWith("/parts");
   if(await rateLimit(env,"user:"+user.id,uploadPartRequest?600:120))return {error:fail("Слишком много запросов",429)};
@@ -284,11 +288,11 @@ async function mediaObject(env,key) {
 
 async function handle(request, env) {
   const url = new URL(request.url);
-  const path = url.pathname.replace(/^\/api/, "").replace(/\/$/, "") || "/";
+  const path = url.pathname.replace(/^(?:\/api)+(?=\/|$)/, "").replace(/\/+$/, "") || "/";
   const method = request.method;
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-methods": "GET,POST,PUT,DELETE,PATCH,OPTIONS", "access-control-allow-headers": "Content-Type,X-Telegram-Init-Data,Authorization", "access-control-allow-credentials": "true", "access-control-max-age": "86400" } });
   if (!env.DB) return fail("D1 binding DB не настроен", 503);
-  if (path === "/health" && method === "GET") return json({ success: true, service: "APPNEST API", status: "online", storage: !!env.FILES });
+  if (path === "/health" && method === "GET") return json({ success: true, service: "APPNEST API", status: "online", storage: !!env.FILES, features: { admin_telegram_login: true, admin_recovery: true } });
   const authResponse=await authEndpoint(request,env,path,method);
   if(authResponse)return authResponse;
   if (path === "/categories" && method === "GET") { const {results=[]}=await env.DB.prepare("SELECT slug,title,icon FROM appnest_categories ORDER BY sort_order,title").all(); return json({success:true,categories:results}); }

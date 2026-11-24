@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#09090f">
+  <meta name="theme-color" content="#090d0c">
   <meta name="description" content="APPNEST — каталог Android-приложений">
   <meta name="appnest-api-base" content="https://appnest-api.anas-grow-up-3.workers.dev/api">
-  <title>APPNEST — Discover Apps</title>
+  <title>APPNEST — Apps, made simple</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -52,14 +52,17 @@
       <section class="page active" id="page-home" data-page="home">
         <div class="welcome-block">
           <div>
-            <span class="eyebrow">YOUR APP DISCOVERY SPACE</span>
-            <h1>Открой что-то<br><span>новое.</span></h1>
-            <p class="welcome-subtitle" id="welcomeSubtitle">Лучшие приложения в одном месте.</p>
+            <span class="eyebrow"><i class="eyebrow-dot"></i> ANDROID APP SPACE</span>
+            <h1>Найди своё<br><span>следующее.</span></h1>
+            <p class="welcome-subtitle" id="welcomeSubtitle">Приложения, которые делают каждый день удобнее.</p>
+            <div class="hero-actions"><button class="hero-primary" data-page="catalog">Исследовать каталог <span>↗</span></button><span class="hero-note">DISCOVER · SAVE · DOWNLOAD</span></div>
           </div>
           <div class="hero-orb" aria-hidden="true">
-            <div class="orb-inner"></div>
+            <div class="orb-inner"></div><span class="orb-core">A<span>.</span></span>
           </div>
         </div>
+
+        <div class="home-proof"><span><i>01</i> Ищи новое</span><span><i>02</i> Сохраняй лучшее</span><span><i>03</i> Скачивай удобно</span></div>
 
         <form class="search-box" id="homeSearchForm">
           <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
@@ -69,8 +72,8 @@
 
         <div class="section-heading">
           <div>
-            <span class="eyebrow">EXPLORE</span>
-            <h2>Категории</h2>
+            <span class="eyebrow">BROWSE BY INTEREST</span>
+            <h2>Выбери направление</h2>
           </div>
           <button class="text-button" data-page="catalog">Все <span>→</span></button>
         </div>
@@ -98,7 +101,7 @@
 
         <div class="section-heading">
           <div>
-            <span class="eyebrow">HANDPICKED</span>
+            <span class="eyebrow">COMMUNITY PICKS</span>
             <h2>Популярное</h2>
           </div>
           <button class="text-button" data-page="catalog">Каталог <span>→</span></button>
@@ -110,8 +113,8 @@
 
         <div class="section-heading">
           <div>
-            <span class="eyebrow">FRESH ARRIVALS</span>
-            <h2>Недавно добавлены</h2>
+            <span class="eyebrow">JUST LANDED</span>
+            <h2>Свежие поступления</h2>
           </div>
         </div>
         <div class="app-list" id="recentApps">
@@ -122,7 +125,7 @@
           <span class="footer-symbol">A.</span>
           <div>
             <strong>APPNEST</strong>
-            <p>Discover. Download. Experience.</p>
+            <p>Твоя коллекция полезных приложений.</p>
           </div>
         </div>
       </section>
@@ -130,7 +133,7 @@
       <!-- CATALOG -->
       <section class="page" id="page-catalog" data-page="catalog">
         <div class="page-heading">
-          <span class="eyebrow">THE COLLECTION</span>
+          <span class="eyebrow">THE APP COLLECTION</span>
           <h1>Каталог<span>.</span></h1>
           <p>Исследуй приложения и находи полезные инструменты.</p>
         </div>

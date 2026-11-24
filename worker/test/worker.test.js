@@ -60,6 +60,12 @@ test("guest access creates a server session without email or Telegram", async ()
   assert.equal(data.guest, true);
   assert.equal(data.is_admin, false);
 });
+test("cross-origin state-changing requests are rejected", async () => {
+  const denied=await call("/auth/guest",{method:"POST",body:{},headers:{Origin:"https://attacker.example"}});
+  assert.equal(denied.status,403);
+  const allowed=await call("/auth/guest",{method:"POST",body:{},headers:{Origin:"https://appnest-web.anas-grow-up-3.workers.dev"}});
+  assert.equal(allowed.status,201);
+});
 test("canonical APPNEST web origin is allowed for credentialed sessions", async () => {
   const response = await call("/health", { method: "OPTIONS", headers: { Origin: "https://appnest-web.anas-grow-up-3.workers.dev" } });
   assert.equal(response.status, 204);

@@ -51,6 +51,14 @@ test("health endpoint is available without Telegram session", async () => {
   assert.equal(response.status, 200);
   assert.equal((await response.json()).status, "online");
 });
+test("standalone registration rejects weak passwords before creating an account", async () => {
+  const response = await call("/auth/register", { method: "POST", body: { email: "user@example.com", name: "User", password: "short" } });
+  assert.equal(response.status, 400);
+});
+test("standalone login rejects empty credentials", async () => {
+  const response = await call("/auth/login", { method: "POST", body: { email: "", password: "" } });
+  assert.equal(response.status, 400);
+});
 test("user routes reject missing or forged Telegram initData", async () => {
   assert.equal((await call("/me")).status, 401);
   assert.equal((await call("/me", { initData: "user=%7B%7D&hash=bad" })).status, 401);

@@ -37,6 +37,92 @@ async function verifyTelegram(initData, token, maxAge = 86400) {
     return { id: String(user.id), username: clean(user.username, 64), first_name: clean(user.first_name, 128), last_name: clean(user.last_name, 128), photo_url: clean(user.photo_url, 1024) };
   } catch { return null; }
 }
+
+function cookieValue(request,name) {
+  const raw=request.headers.get("Cookie")||"";
+  for(const part of raw.split(";")){const i=part.indexOf("=");if(i<0)continue;if(part.slice(0,i).trim()===name)return decodeURIComponent(part.slice(i+1).trim());}
+  return "";
+}
+function sessionCookie(token,maxAge=2592000){return `appnest_session=${encodeURIComponent(token)}; Path=/api; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;}
+async function passwordHash(password,saltHex) {
+  const salt=saltHex?Uint8Array.from(saltHex.match(/../g).map(x=>parseInt(x,16))):crypto.getRandomValues(new Uint8Array(16));
+  const key=await crypto.subtle.importKey("raw",encoder.encode(password),"PBKDF2",false,["deriveBits"]);
+  const bits=await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt,iterations:210000},key,256);
+  return {salt:hex(salt),hash:hex(bits)};
+}
+async function issueWebSession(env,userId) {
+  const token=hex(crypto.getRandomValues(new Uint8Array(32)));
+  const tokenHash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(token)));
+  const expires=Math.floor(Date.now()/1000)+2592000;
+  await env.DB.prepare("INSERT INTO appnest_auth_sessions(token_hash,user_id,expires_at) VALUES(?,?,?)").bind(tokenHash,userId,expires).run();
+  return token;
+}
+async function webUserById(env,userId) {
+  const row=await env.DB.prepare("SELECT u.telegram_id,u.username,u.first_name,u.last_name,u.photo_url,u.is_blocked,c.email FROM users u LEFT JOIN appnest_credentials c ON c.user_id=u.telegram_id WHERE u.telegram_id=?").bind(userId).first();
+  if(!row)return null;
+  return {id:String(row.telegram_id),username:row.username||"",first_name:row.first_name||"",last_name:row.last_name||"",photo_url:row.photo_url||"",email:row.email||""};
+}
+async function webAdmin(env,userId) {
+  const ids=(env.ADMIN_IDS||"").split(",").map(x=>x.trim()).filter(Boolean);
+  if(ids.includes(String(userId)))return true;
+  const row=await env.DB.prepare("SELECT user_id FROM appnest_admins WHERE user_id=?").bind(String(userId)).first();
+  return !!row;
+}
+async function createGuestAccount(env) {
+  const userId="guest_"+crypto.randomUUID();
+  const name="Гость";
+  await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name) VALUES(?,?,?)").bind(userId,"",name).run();
+  const token=await issueWebSession(env,userId);
+  return {user:await webUserById(env,userId),token};
+}
+async function authEndpoint(request,env,path,method) {
+  if(path==="/auth/guest"&&method==="POST"){
+    const ip=request.headers.get("CF-Connecting-IP")||"unknown";
+    if(await rateLimit(env,"guest:"+ip,10,3600))return fail("Слишком много гостевых сессий с этого подключения. Попробуйте позже.",429);
+    const account=await createGuestAccount(env);
+    return json({success:true,user:account.user,is_admin:false,guest:true},201,{"set-cookie":sessionCookie(account.token)});
+  }
+  if(path==="/auth/register"&&method==="POST"){
+    const b=await readJson(request),email=clean(b.email,254).toLowerCase(),password=typeof b.password==="string"?b.password:"",name=clean(b.name,80);
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return fail("Укажите корректную почту");
+    if(password.length<10||password.length>128)return fail("Пароль должен содержать от 10 до 128 символов");
+    if(name.length<2)return fail("Укажите имя (минимум 2 символа)");
+    if(await rateLimit(env,"register:"+hex(await crypto.subtle.digest("SHA-256",encoder.encode(email))),5,3600))return fail("Слишком много попыток. Попробуйте позже.",429);
+    let userId="web_"+crypto.randomUUID();
+    const tg=await verifyTelegram(request.headers.get("X-Telegram-Init-Data")||"",env.BOT_TOKEN,Number(env.TELEGRAM_AUTH_MAX_AGE||86400));
+    if(tg){
+      userId=tg.id;
+      await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name,last_name,photo_url) VALUES(?,?,?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username,first_name=excluded.first_name,last_name=excluded.last_name,photo_url=CASE WHEN excluded.photo_url<>'' THEN excluded.photo_url ELSE users.photo_url END").bind(userId,tg.username,name,tg.last_name,tg.photo_url).run();
+    }else{
+      await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name) VALUES(?,?,?)").bind(userId,email.split("@")[0].slice(0,64),name).run();
+    }
+    const existing=await env.DB.prepare("SELECT user_id FROM appnest_credentials WHERE email=? OR user_id=?").bind(email,userId).first();
+    if(existing){if(userId.startsWith("web_"))await env.DB.prepare("DELETE FROM users WHERE telegram_id=?").bind(userId).run();return fail("Эта почта уже зарегистрирована или профиль уже привязан",409);}
+    const derived=await passwordHash(password);
+    await env.DB.prepare("INSERT INTO appnest_credentials(user_id,email,password_salt,password_hash) VALUES(?,?,?,?)").bind(userId,email,derived.salt,derived.hash).run();
+    const token=await issueWebSession(env,userId),user=await webUserById(env,userId);
+    return json({success:true,user,is_admin:await webAdmin(env,userId)},201,{"set-cookie":sessionCookie(token)});
+  }
+  if(path==="/auth/login"&&method==="POST"){
+    const b=await readJson(request),email=clean(b.email,254).toLowerCase(),password=typeof b.password==="string"?b.password:"";
+    if(!email||password.length>128)return fail("Проверьте почту и пароль");
+    if(await rateLimit(env,"login:"+hex(await crypto.subtle.digest("SHA-256",encoder.encode(email))),10,900))return fail("Слишком много попыток. Подождите 15 минут.",429);
+    const row=await env.DB.prepare("SELECT c.user_id,c.password_salt,c.password_hash,u.is_blocked FROM appnest_credentials c JOIN users u ON u.telegram_id=c.user_id WHERE c.email=?").bind(email).first();
+    if(!row){await passwordHash(password,"00000000000000000000000000000000");return fail("Неверная почта или пароль",401);}
+    const candidate=await passwordHash(password,row.password_salt);
+    if(!constantTimeEqual(candidate.hash,row.password_hash))return fail("Неверная почта или пароль",401);
+    if(row.is_blocked)return fail("Доступ к сервису ограничен",403);
+    const token=await issueWebSession(env,row.user_id),user=await webUserById(env,row.user_id);
+    return json({success:true,user,is_admin:await webAdmin(env,row.user_id)},200,{"set-cookie":sessionCookie(token)});
+  }
+  if(path==="/auth/logout"&&method==="POST"){
+    const token=cookieValue(request,"appnest_session");
+    if(token){const hash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(token)));await env.DB.prepare("DELETE FROM appnest_auth_sessions WHERE token_hash=?").bind(hash).run();}
+    return json({success:true},200,{"set-cookie":sessionCookie("",0)});
+  }
+  return null;
+}
+
 async function readJson(request) {
   const body=await request.text();
   if(encoder.encode(body).byteLength>MAX_JSON) throw Object.assign(new Error("Слишком большой запрос"),{status:413});
@@ -55,16 +141,29 @@ async function rateLimit(env, key, limit = 60, windowSeconds = 60) {
   return (row?.count || 0) > limit;
 }
 async function auth(request, env) {
-  const raw = request.headers.get("X-Telegram-Init-Data") || "";
-  const user = await verifyTelegram(raw, env.BOT_TOKEN, Number(env.TELEGRAM_AUTH_MAX_AGE || 86400));
-  if (!user) return { error: fail("Требуется действительная авторизация Telegram", 401) };
-  const uploadPartRequest=new URL(request.url).pathname.startsWith("/api/admin/uploads/") && new URL(request.url).pathname.endsWith("/parts");
-  if (await rateLimit(env, "user:" + user.id, uploadPartRequest ? 600 : 120)) return { error: fail("Слишком много запросов", 429) };
-  const blocked = await env.DB.prepare("SELECT is_blocked FROM users WHERE telegram_id=?").bind(user.id).first();
-  if (blocked?.is_blocked) return { error: fail("Доступ к сервису ограничен", 403) };
-  await env.DB.prepare("INSERT INTO users (telegram_id, username, first_name, last_name) VALUES (?, ?, ?, ?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, last_name=excluded.last_name").bind(user.id,user.username,user.first_name,user.last_name).run();
-  const adminIds = (env.ADMIN_IDS || "").split(",").map(x => x.trim()).filter(Boolean);
-  return { user, isAdmin: adminIds.includes(String(user.id)) };
+  const cookie=cookieValue(request,"appnest_session");
+  if(cookie){
+    const tokenHash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(cookie)));
+    const row=await env.DB.prepare("SELECT user_id,expires_at FROM appnest_auth_sessions WHERE token_hash=?").bind(tokenHash).first();
+    if(row&&row.expires_at>Math.floor(Date.now()/1000)){
+      const user=await webUserById(env,row.user_id);
+      if(!user)return {error:fail("Сессия недействительна. Войдите снова.",401)};
+      const blocked=await env.DB.prepare("SELECT is_blocked FROM users WHERE telegram_id=?").bind(row.user_id).first();
+      if(blocked?.is_blocked)return {error:fail("Доступ к сервису ограничен",403)};
+      if(await rateLimit(env,"user:"+row.user_id,120))return {error:fail("Слишком много запросов",429)};
+      return {user,isAdmin:await webAdmin(env,row.user_id)};
+    }
+    if(row)await env.DB.prepare("DELETE FROM appnest_auth_sessions WHERE token_hash=?").bind(tokenHash).run();
+  }
+  const raw=request.headers.get("X-Telegram-Init-Data")||"";
+  const user=await verifyTelegram(raw,env.BOT_TOKEN,Number(env.TELEGRAM_AUTH_MAX_AGE||86400));
+  if(!user)return {error:fail("Войдите в APPNEST по почте и паролю",401)};
+  const uploadPartRequest=new URL(request.url).pathname.startsWith("/api/admin/uploads/")&&new URL(request.url).pathname.endsWith("/parts");
+  if(await rateLimit(env,"user:"+user.id,uploadPartRequest?600:120))return {error:fail("Слишком много запросов",429)};
+  const blocked=await env.DB.prepare("SELECT is_blocked FROM users WHERE telegram_id=?").bind(user.id).first();
+  if(blocked?.is_blocked)return {error:fail("Доступ к сервису ограничен",403)};
+  await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name,last_name,photo_url) VALUES(?,?,?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username,first_name=excluded.first_name,last_name=excluded.last_name,photo_url=CASE WHEN excluded.photo_url<>'' THEN excluded.photo_url ELSE users.photo_url END").bind(user.id,user.username,user.first_name,user.last_name,user.photo_url).run();
+  return {user,isAdmin:await webAdmin(env,user.id)};
 }
 async function adminAuth(request, env) {
   const session = await auth(request, env);
@@ -77,7 +176,7 @@ async function audit(env, actor, action, target, details = "") {
 }
 async function subscriptionCheck(env, userId) {
   const { results = [] } = await env.DB.prepare("SELECT chat_id, title, invite_url FROM appnest_required_channels WHERE enabled=1").all();
-  if (!results.length) return { allowed: true, channels: [] };
+  if (!results.length || env.TELEGRAM_SUBSCRIPTIONS_ENABLED !== "true") return { allowed: true, channels: [] };
   if (!env.BOT_TOKEN) return { allowed: false, unavailable: true, channels: results };
   const checks = await Promise.all(results.map(async channel => {
     try {
@@ -154,9 +253,11 @@ async function handle(request, env) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api/, "").replace(/\/$/, "") || "/";
   const method = request.method;
-  if (method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-methods": "GET,POST,PUT,DELETE,PATCH,OPTIONS", "access-control-allow-headers": "Content-Type,X-Telegram-Init-Data", "access-control-max-age": "86400" } });
+  if (method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-methods": "GET,POST,PUT,DELETE,PATCH,OPTIONS", "access-control-allow-headers": "Content-Type,X-Telegram-Init-Data,Authorization", "access-control-allow-credentials": "true", "access-control-max-age": "86400" } });
   if (!env.DB) return fail("D1 binding DB не настроен", 503);
   if (path === "/health" && method === "GET") return json({ success: true, service: "APPNEST API", status: "online", storage: !!env.FILES });
+  const authResponse=await authEndpoint(request,env,path,method);
+  if(authResponse)return authResponse;
   if (path === "/categories" && method === "GET") { const {results=[]}=await env.DB.prepare("SELECT slug,title,icon FROM appnest_categories ORDER BY sort_order,title").all(); return json({success:true,categories:results}); }
   if (path === "/apps" && method === "GET") {
     const category = clean(url.searchParams.get("category"), 80);
@@ -601,6 +702,7 @@ async function cleanupExpired(env) {
   }
   await env.DB.batch([
     env.DB.prepare("DELETE FROM appnest_download_tokens WHERE expires_at<? OR used_at IS NOT NULL").bind(now),
+    env.DB.prepare("DELETE FROM appnest_auth_sessions WHERE expires_at<?").bind(now),
     env.DB.prepare("DELETE FROM appnest_rate_limits WHERE expires_at<?").bind(now),
     env.DB.prepare("DELETE FROM appnest_ad_frequency WHERE day<date('now','-90 days')"),
     env.DB.prepare("DELETE FROM appnest_upload_sessions WHERE status IN ('completed','aborted','failed') AND created_at<datetime('now','-30 days')")

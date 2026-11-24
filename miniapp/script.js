@@ -43,6 +43,7 @@
     return new Promise((resolve,reject)=>{
       const xhr=new XMLHttpRequest();
       xhr.open("PUT",API+`/admin/uploads/${encodeURIComponent(uploadId)}/parts?part_number=${partNumber}`);
+      xhr.withCredentials=true;
       xhr.setRequestHeader("X-Telegram-Init-Data",initData);
       xhr.setRequestHeader("Content-Type","application/octet-stream");
       xhr.upload.onprogress=e=>{if(e.lengthComputable) onProgress(e.loaded,e.total);};
@@ -118,6 +119,7 @@
   }
   async function request(path, options = {}) {
     const response = await fetch(API + path, {
+      credentials: "include",
       ...options,
       headers: {
         "Content-Type": "application/json",
@@ -135,6 +137,93 @@
     }
 
     return data;
+  }
+
+  function ensureAuthGate() {
+    if($("#appnestAuthGate"))return $("#appnestAuthGate");
+    const style=document.createElement("style");
+    style.textContent=`
+      #appnestAuthGate{position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;padding:22px;background:rgba(5,6,12,.88);backdrop-filter:blur(18px)}
+      #appnestAuthGate.open{display:flex}
+      #appnestAuthGate .auth-card{width:min(100%,420px);padding:26px;border:1px solid rgba(255,255,255,.12);border-radius:24px;background:#11121b;color:#f5f5f7;box-shadow:0 24px 90px #0009}
+      #appnestAuthGate .auth-brand{font-size:13px;letter-spacing:.22em;color:#a99cff;font-weight:800}
+      #appnestAuthGate h2{font-size:27px;margin:12px 0 7px;letter-spacing:-.04em}
+      #appnestAuthGate p{color:#a6a7b4;font-size:13px;line-height:1.55;margin:0 0 20px}
+      #appnestAuthGate .auth-tabs{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:4px;border-radius:12px;background:#080910;margin-bottom:18px}
+      #appnestAuthGate button,#appnestAuthGate input{font:inherit}
+      #appnestAuthGate .auth-tabs button{border:0;border-radius:9px;padding:10px;background:transparent;color:#aaa}
+      #appnestAuthGate .auth-tabs button.active{background:#27243a;color:#fff}
+      #appnestAuthGate label{display:block;font-size:12px;color:#c4c4cf;margin:13px 0 6px}
+      #appnestAuthGate input{width:100%;box-sizing:border-box;border:1px solid #30313e;border-radius:11px;padding:13px;background:#090a11;color:#fff;outline:none}
+      #appnestAuthGate input:focus{border-color:#9b8cff}
+      #appnestAuthGate .auth-submit{width:100%;margin-top:18px;border:0;border-radius:12px;padding:14px;background:#9a87ff;color:#100e1b;font-weight:800}
+      #appnestAuthGate .auth-error{min-height:18px;margin-top:10px;color:#ff9b9b;font-size:12px}
+      #appnestAuthGate .auth-foot{font-size:11px;color:#77798a;margin-top:14px}
+      #logoutButton{margin-top:16px;width:100%;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:13px;background:transparent;color:#ddd}
+    `;
+    document.head.append(style);
+    const gate=document.createElement("div");
+    gate.id="appnestAuthGate";
+    gate.innerHTML=`<div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+      <div class="auth-brand">APPNEST / ACCOUNT</div>
+      <h2 id="authTitle">Твоя библиотека приложений</h2>
+      <p>Войди или создай аккаунт. Telegram для работы APPNEST больше не обязателен.</p>
+      <div class="auth-tabs"><button type="button" data-auth-mode="login" class="active">Войти</button><button type="button" data-auth-mode="register">Регистрация</button></div>
+      <form id="appnestAuthForm" autocomplete="on">
+        <div id="authNameWrap" hidden><label for="authName">Имя</label><input id="authName" name="name" maxlength="80" autocomplete="name" placeholder="Как тебя называть"></div>
+        <label for="authEmail">Электронная почта</label><input id="authEmail" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="name@example.com">
+        <label for="authPassword">Пароль</label><input id="authPassword" name="password" type="password" minlength="10" maxlength="128" required autocomplete="current-password" placeholder="Минимум 10 символов">
+        <button class="auth-submit" type="submit" id="authSubmit">Войти в APPNEST</button><button type="button" id="authGuest" class="auth-guest" style="width:100%;margin-top:10px;border:1px solid #3a3a4a;border-radius:12px;padding:13px;background:#191a26;color:#eee;font-weight:700">Продолжить как гость</button>
+        <div class="auth-error" id="authError" role="alert"></div>
+      </form>
+      <div class="auth-foot">Пароль хранится в виде криптографического хеша. Не используй пароль от других сервисов.</div>
+    </div>`;
+    document.body.append(gate);
+    let mode="login";
+    gate.querySelectorAll("[data-auth-mode]").forEach(button=>button.addEventListener("click",()=>{
+      mode=button.dataset.authMode;
+      gate.querySelectorAll("[data-auth-mode]").forEach(x=>x.classList.toggle("active",x===button));
+      $("#authNameWrap",gate).hidden=mode!=="register";
+      $("#authPassword",gate).autocomplete=mode==="register"?"new-password":"current-password";
+      $("#authPassword",gate).minLength=mode==="register"?10:1;
+      $("#authSubmit",gate).textContent=mode==="register"?"Создать аккаунт":"Войти в APPNEST";
+      $("#authError",gate).textContent="";
+    }));
+    $("#appnestAuthForm",gate).addEventListener("submit",async event=>{
+      event.preventDefault();
+      const button=$("#authSubmit",gate),error=$("#authError",gate);
+      button.disabled=true;error.textContent="";
+      const data=Object.fromEntries(new FormData(event.currentTarget));
+      try{
+        await request(mode==="register"?"/auth/register":"/auth/login",{method:"POST",body:JSON.stringify(data)});
+        gate.classList.remove("open");
+        await loadProfileData();
+        await loadAds();
+        toast(mode==="register"?"Аккаунт создан":"Вход выполнен");
+      }catch(e){error.textContent=e.message||"Не удалось выполнить вход";}
+      finally{button.disabled=false;}
+    });
+    $("#authGuest",gate).addEventListener("click",async()=>{
+      const button=$("#authGuest",gate),error=$("#authError",gate);
+      button.disabled=true;error.textContent="";
+      try{
+        await request("/auth/guest",{method:"POST",body:JSON.stringify({})});
+        gate.classList.remove("open");
+        await loadProfileData();
+        await loadAds();
+        toast("Гостевой доступ открыт");
+      }catch(e){error.textContent=e.message||"Не удалось открыть гостевой доступ";}
+      finally{button.disabled=false;}
+    });
+    gate.addEventListener("click",event=>{if(event.target===gate)event.preventDefault();});
+    return gate;
+  }
+  function showAuthGate(){ensureAuthGate().classList.add("open");}
+  function hideAuthGate(){const gate=$("#appnestAuthGate");if(gate)gate.classList.remove("open");}
+  async function logoutAccount(){
+    try{await request("/auth/logout",{method:"POST",body:JSON.stringify({})});}
+    catch(e){toast(e.message||"Не удалось выйти");return;}
+    state.user=null;state.isAdmin=false;state.favorites.clear();state.history=[];renderProfile();showAuthGate();
   }
 
   function escapeHTML(value = "") {
@@ -467,7 +556,7 @@
 
     $("#profileName") && ($("#profileName").textContent = name);
     $("#profileUsername") && ($("#profileUsername").textContent =
-      user.username ? "@" + user.username : "Telegram user");
+      user.username ? "@" + user.username : (user.email || (String(user.id||"").startsWith("guest_") ? "Гостевой аккаунт" : "APPNEST account")));
 
     const letter = name.charAt(0).toUpperCase();
     $("#headerAvatarLetter") && ($("#headerAvatarLetter").textContent = letter);
@@ -485,6 +574,8 @@
     $("#favoriteCount") && ($("#favoriteCount").textContent = state.favorites.size);
     $("#downloadCount") && ($("#downloadCount").textContent = state.history.length);
     $("#adminEntry") && ($("#adminEntry").hidden = !state.isAdmin);
+    const about=$("#page-profile .about-block");
+    if(about && !$("#logoutButton")){const out=document.createElement("button");out.id="logoutButton";out.type="button";out.textContent="Выйти из аккаунта";about.append(out);}
   }
 
   async function loadProfileData() {
@@ -509,6 +600,7 @@
       state.notifications = data.notifications || [];
       renderProfile();
     } catch (error) {
+      if(error.status===401){showAuthGate();return;}
       console.error("APPNEST profile:", error);
     }
   }
@@ -830,6 +922,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
   }
 
   document.addEventListener("click", event => {
+    if(event.target.closest("#logoutButton")){logoutAccount();return;}
     const pageButton = event.target.closest("[data-page]");
     if (pageButton) {
       event.preventDefault();
@@ -1036,9 +1129,6 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
   translationObserver.observe(document.body,{childList:true,subtree:true});
 
   async function start() {
-    if (!initData) {
-      toast("Откройте APPNEST через Telegram");
-    }
     await Promise.all([
       loadCategories(),
       loadApps(),

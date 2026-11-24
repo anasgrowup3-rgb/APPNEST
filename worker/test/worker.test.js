@@ -25,7 +25,7 @@ class MockDB {
     };
   }
 }
-const env = () => ({ DB: new MockDB(), FILES: { get: async () => null }, BOT_TOKEN: TOKEN, ADMIN_IDS: "42", ALLOWED_ORIGIN: "https://mini.example" });
+const env = () => ({ DB: new MockDB(), FILES: { get: async () => null }, BOT_TOKEN: TOKEN, ADMIN_IDS: "42", ALLOWED_ORIGIN: "https://mini.example", TELEGRAM_SUBSCRIPTIONS_ENABLED: "true" });
 function signedInitData(userId = 42, ageSeconds = 0) {
   const authDate = Math.floor(Date.now() / 1000) - ageSeconds;
   const params = new URLSearchParams({
@@ -50,6 +50,14 @@ test("health endpoint is available without Telegram session", async () => {
   const response = await call("/health");
   assert.equal(response.status, 200);
   assert.equal((await response.json()).status, "online");
+});
+test("standalone registration rejects weak passwords before creating an account", async () => {
+  const response = await call("/auth/register", { method: "POST", body: { email: "user@example.com", name: "User", password: "short" } });
+  assert.equal(response.status, 400);
+});
+test("standalone login rejects empty credentials", async () => {
+  const response = await call("/auth/login", { method: "POST", body: { email: "", password: "" } });
+  assert.equal(response.status, 400);
 });
 test("user routes reject missing or forged Telegram initData", async () => {
   assert.equal((await call("/me")).status, 401);
@@ -230,7 +238,7 @@ test("scheduled cleanup aborts expired R2 multipart sessions and batches retenti
   };
   await cleanupExpired(customEnv);
   assert.equal(aborted,true);
-  assert.equal(batchCount,4);
+  assert.equal(batchCount,5);
 });
 
 test("published media lookup requires an exact referenced key and media namespace", async () => {

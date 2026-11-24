@@ -963,6 +963,21 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
       return;
     }
 
+    const recoveryGenerate=event.target.closest("#generateRecoveryCodes");
+    if(recoveryGenerate){
+      if(!confirm("Создать новые коды? Все предыдущие перестанут работать."))return;
+      recoveryGenerate.disabled=true;
+      request("/admin/recovery-codes",{method:"POST",body:JSON.stringify({})}).then(data=>{
+        const codes=(data.codes||[]).join("\\n");
+        openModal("<h2>Резервные коды</h2><p>Сохрани их сейчас. Каждый код одноразовый; повторно показать их нельзя.</p><textarea id=\"recoveryCodesText\" readonly rows=\"10\" style=\"width:100%;font-family:monospace\">"+escapeHTML(codes)+"</textarea><button type=\"button\" class=\"primary-button full-button\" id=\"copyRecoveryCodes\">Скопировать коды</button>");
+      }).catch(e=>toast(e.message)).finally(()=>{recoveryGenerate.disabled=false;});return;
+    }
+    const recoveryRevoke=event.target.closest("#revokeRecoveryCodes");
+    if(recoveryRevoke){if(!confirm("Отозвать все резервные коды?"))return;request("/admin/recovery-codes",{method:"DELETE",body:JSON.stringify({})}).then(()=>toast("Резервные коды отозваны")).catch(e=>toast(e.message));return;}
+    const copyRecovery=event.target.closest("#copyRecoveryCodes");
+    if(copyRecovery){const value=$("#recoveryCodesText")?.value||"";if(navigator.clipboard?.writeText)navigator.clipboard.writeText(value).then(()=>toast("Скопировано")).catch(()=>toast("Скопируй коды вручную"));else toast("Выдели и скопируй коды вручную");return;}
+    const runDiagnostics=event.target.closest("#runDiagnostics");
+    if(runDiagnostics){runDiagnostics.disabled=true;request("/admin/diagnostics").then(data=>{$("#diagnosticsResult").innerHTML=Object.entries(data.checks||{}).map(([key,item])=>"<p><strong>"+escapeHTML(key)+":</strong> "+escapeHTML(item.status||"unknown")+(item.username?" · @"+escapeHTML(item.username):"")+"</p>").join("");}).catch(e=>$("#diagnosticsResult").textContent=e.message).finally(()=>{runDiagnostics.disabled=false;});return;}
     const telegramMenuButton=event.target.closest("#telegramMenuButton");
     if(telegramMenuButton){
       telegramMenuButton.disabled=true;

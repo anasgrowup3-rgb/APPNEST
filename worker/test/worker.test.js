@@ -80,8 +80,9 @@ test("user routes reject missing or forged Telegram initData", async () => {
 });
 test("new admin security routes reject unauthenticated and non-admin callers", async () => {
   for (const [method,path] of [["GET","/admin/diagnostics"],["POST","/admin/diagnostics/channel"],["POST","/admin/recovery-codes"],["DELETE","/admin/recovery-codes"]]) {
-    assert.equal((await call(path,{method,body:{}})).status,401);
-    assert.equal((await call(path,{method,initData:signedInitData(7),body:{}})).status,403);
+    const options=method==="GET"?{method}:{method,body:{}};
+    assert.equal((await call(path,options)).status,401);
+    assert.equal((await call(path,{...options,initData:signedInitData(7)})).status,403);
   }
 });
 

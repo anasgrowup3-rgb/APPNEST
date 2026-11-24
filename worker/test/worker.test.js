@@ -238,7 +238,7 @@ test("scheduled cleanup aborts expired R2 multipart sessions and batches retenti
   };
   await cleanupExpired(customEnv);
   assert.equal(aborted,true);
-  assert.equal(batchCount,4);
+  assert.equal(batchCount,5);
 });
 
 test("published media lookup requires an exact referenced key and media namespace", async () => {

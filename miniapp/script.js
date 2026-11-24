@@ -969,7 +969,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
       if(!confirm("Создать новые коды? Все предыдущие перестанут работать."))return;
       recoveryGenerate.disabled=true;
       request("/admin/recovery-codes",{method:"POST",body:JSON.stringify({})}).then(data=>{
-        const codes=(data.codes||[]).join("\\n");
+        const codes=(data.codes||[]).join("\n");
         openModal("<h2>Резервные коды</h2><p>Сохрани их сейчас. Каждый код одноразовый; повторно показать их нельзя.</p><textarea id=\"recoveryCodesText\" readonly rows=\"10\" style=\"width:100%;font-family:monospace\">"+escapeHTML(codes)+"</textarea><button type=\"button\" class=\"primary-button full-button\" id=\"copyRecoveryCodes\">Скопировать коды</button>");
       }).catch(e=>toast(e.message)).finally(()=>{recoveryGenerate.disabled=false;});return;
     }

@@ -716,8 +716,8 @@ export default {
   },
   async fetch(request, env) {
     const origin = request.headers.get("Origin");
-    const allowedOrigins = (env.ALLOWED_ORIGINS || env.ALLOWED_ORIGIN || "")
-      .split(",").map(value => value.trim()).filter(Boolean);
+    const allowedOrigins = [...(env.ALLOWED_ORIGINS || "").split(","), ...(env.ALLOWED_ORIGIN || "").split(","), "https://appnest-web.anas-grow-up-3.workers.dev"]
+      .map(value => value.trim()).filter(Boolean);
     const cors = { "vary": "Origin" };
     if (origin && allowedOrigins.includes(origin)) cors["access-control-allow-origin"] = origin;
     try {

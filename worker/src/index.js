@@ -784,6 +784,9 @@ export default {
       .map(value => value.trim()).filter(Boolean);
     const cors = { "vary": "Origin", "access-control-allow-credentials": "true" };
     if (origin && allowedOrigins.includes(origin)) cors["access-control-allow-origin"] = origin;
+    if (!["GET","HEAD","OPTIONS"].includes(request.method) && origin && !allowedOrigins.includes(origin)) {
+      return new Response(JSON.stringify({success:false,error:"Origin not allowed"}),{status:403,headers:JSON_HEADERS});
+    }
     try {
       const response = await handle(request,env);
       const headers = new Headers(response.headers);

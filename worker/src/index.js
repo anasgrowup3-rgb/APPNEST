@@ -64,7 +64,7 @@ async function auth(request, env) {
   if (blocked?.is_blocked) return { error: fail("Доступ к сервису ограничен", 403) };
   await env.DB.prepare("INSERT INTO users (telegram_id, username, first_name, last_name) VALUES (?, ?, ?, ?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, last_name=excluded.last_name").bind(user.id,user.username,user.first_name,user.last_name).run();
   const adminIds = (env.ADMIN_IDS || "").split(",").map(x => x.trim()).filter(Boolean);
-  return { user, isAdmin: adminIds.includes(user.id) };
+  return { user, isAdmin: adminIds.includes(String(user.id)) };
 }
 async function adminAuth(request, env) {
   const session = await auth(request, env);

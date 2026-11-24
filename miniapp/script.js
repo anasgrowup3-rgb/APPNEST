@@ -30,6 +30,8 @@
   };
 
   const initData = tg?.initData || "";
+  let telegramAuthDisabled = false;
+  try { telegramAuthDisabled = localStorage.getItem("appnest-telegram-auth-disabled") === "1"; } catch {}
 
 
   function setUploadProgress(done,total,label="Загрузка") {
@@ -123,7 +125,7 @@
       ...options,
       headers: {
         "Content-Type": "application/json",
-        "X-Telegram-Init-Data": initData,
+        "X-Telegram-Init-Data": telegramAuthDisabled ? "" : initData,
         ...(options.headers || {})
       }
     });
@@ -223,7 +225,7 @@
         const error=$("#authError",gate);
         telegramAdminButton.disabled=true;error.textContent="";
         try{
-          await request("/auth/admin-telegram",{method:"POST",body:JSON.stringify({})});
+          await request("/auth/admin-telegram",{method:"POST",body:JSON.stringify({}),headers:{"X-Telegram-Init-Data":initData}});
           gate.classList.remove("open");
           await loadProfileData();
           if(!state.isAdmin)throw new Error("Сервер не подтвердил права администратора");
@@ -243,6 +245,8 @@
   async function logoutAccount(){
     try{await request("/auth/logout",{method:"POST",body:JSON.stringify({})});}
     catch(e){toast(e.message||"Не удалось выйти");return;}
+    try { localStorage.setItem("appnest-telegram-auth-disabled", "1"); } catch {}
+    telegramAuthDisabled = true;
     state.user=null;state.isAdmin=false;state.favorites.clear();state.history=[];renderProfile();showAuthGate();
   }
 
@@ -571,7 +575,7 @@
   }
 
   function renderProfile() {
-    const user = state.user || tg?.initDataUnsafe?.user || {};
+    const user = state.user || (!telegramAuthDisabled ? tg?.initDataUnsafe?.user : null) || {};
     const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || "Пользователь";
 
     $("#profileName") && ($("#profileName").textContent = name);
@@ -615,7 +619,7 @@
         const oldText=adminButton.textContent;
         adminButton.textContent="Проверяем администратора…";
         try{
-          await request("/auth/admin-telegram",{method:"POST",body:JSON.stringify({})});
+          await request("/auth/admin-telegram",{method:"POST",body:JSON.stringify({}),headers:{"X-Telegram-Init-Data":initData}});
           await loadProfileData();
           if(!state.isAdmin) throw new Error("Сервер не подтвердил права администратора");
           navigate("admin");

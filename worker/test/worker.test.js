@@ -51,6 +51,21 @@ test("health endpoint is available without Telegram session", async () => {
   assert.equal(response.status, 200);
   assert.equal((await response.json()).status, "online");
 });
+test("guest access creates a server session without email or Telegram", async () => {
+  const response = await call("/auth/guest", { method: "POST", body: {} });
+  assert.equal(response.status, 201);
+  assert.match(response.headers.get("set-cookie") || "", /appnest_session=.*HttpOnly/);
+  const data = await response.json();
+  assert.equal(data.success, true);
+  assert.equal(data.guest, true);
+  assert.equal(data.is_admin, false);
+});
+test("canonical APPNEST web origin is allowed for credentialed sessions", async () => {
+  const response = await call("/health", { method: "OPTIONS", headers: { Origin: "https://appnest-web.anas-grow-up-3.workers.dev" } });
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://appnest-web.anas-grow-up-3.workers.dev");
+  assert.equal(response.headers.get("access-control-allow-credentials"), "true");
+});
 test("standalone registration rejects weak passwords before creating an account", async () => {
   const response = await call("/auth/register", { method: "POST", body: { email: "user@example.com", name: "User", password: "short" } });
   assert.equal(response.status, 400);

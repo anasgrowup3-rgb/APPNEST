@@ -129,3 +129,11 @@ Initial categories: Productivity, Games, Tools, Other.
 
 ## Work log
 Append dated entries with: change, files/resources changed, tests run, result, known limitation, next concrete action.
+
+### 2026-11-24 — production hardening and three-pass verification
+- Change: replaced the production `appnest-api` Worker content with the exact `worker/src/index.js` from main; removed the temporary `__bot_setup` route. Verified that the production D1 and R2 bindings, `ADMIN_IDS`, `ALLOWED_ORIGIN`, and `BOT_TOKEN` secret binding remained intact.
+- Frontend: verified the deployed `appnest-web` Worker has a 100% traffic deployment and enabled workers.dev subdomain. Compared its embedded HTML, JS, and CSS against the current repository files; all three matched (HTML differs only by the expected same-origin `/api` base URL). Confirmed its `/api` proxy points to `appnest-api`.
+- Tests: confirmed the latest APPNEST validation workflow run on commit `d1b94130d381af054f5daa5fefa155679f11a8d8` completed successfully; prior CI covers 30 Worker tests and 19 migration tests. Recomputed all three Pages deployment asset SHA-256 values; each matches the corresponding GitHub frontend file.
+- Result: production temporary setup route removed; Worker secrets and storage bindings preserved; Worker-hosted frontend content and routing configuration verified.
+- Limitation: direct HTTP requests to public Workers/Pages hostnames are blocked in this execution environment, so browser status cannot be claimed. Pages project still has a user-reported 404; Telegram menu-button API previously returned 429. Production catalogue remains empty.
+- Next: externally open `https://appnest-web.anas-grow-up-3.workers.dev/`, then complete Telegram menu-button setup after the Telegram rate limit clears; only publish apps after source, package, signing, and distribution checks.

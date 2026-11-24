@@ -130,6 +130,15 @@ Initial categories: Productivity, Games, Tools, Other.
 ## Work log
 Append dated entries with: change, files/resources changed, tests run, result, known limitation, next concrete action.
 
+### 2026-11-24 — APPNEST 2.0 visual redesign
+- Reworked the home discovery hero copy and hierarchy, added a clear catalogue CTA, a three-step product strip, and updated category/popular/recent section labels.
+- Replaced the old purple-black palette with a distinct graphite and acid-mint design system; refreshed header, hero orb, cards, category tiles, controls, profile surfaces, navigation, modal, empty states, and responsive mobile sizing.
+- Committed frontend changes: `miniapp/index.html` commit `8feed4af4fa3fc01f96b9be2abe7e920f1ad8ead`; `miniapp/style.css` commit `85ad617ff0b50f1df95cf98f42f4108e1c4f23fd`.
+- Published the updated embedded frontend to Worker `appnest-web`; new deployment `ea440a48-b49b-4757-9ad5-60d7786d026b`, version `097b85ee-e90a-48ef-9dff-284984c360ad`, 100% traffic.
+- Verified embedded HTML/CSS/JS exactly match current GitHub files (HTML API base intentionally set to same-origin `/api`); JS syntax check passed; CSS brace balance is zero; 67 HTML IDs with no duplicates; key UI IDs are present.
+- Limitation: public browser rendering still needs a device-side check; direct external HTTP is blocked in this execution environment. The previous Pages URL is not the updated Worker-hosted frontend URL.
+
+
 ### 2026-11-24 — production hardening and three-pass verification
 - Change: replaced the production `appnest-api` Worker content with the exact `worker/src/index.js` from main; removed the temporary `__bot_setup` route. Verified that the production D1 and R2 bindings, `ADMIN_IDS`, `ALLOWED_ORIGIN`, and `BOT_TOKEN` secret binding remained intact.
 - Frontend: verified the deployed `appnest-web` Worker has a 100% traffic deployment and enabled workers.dev subdomain. Compared its embedded HTML, JS, and CSS against the current repository files; all three matched (HTML differs only by the expected same-origin `/api` base URL). Confirmed its `/api` proxy points to `appnest-api`.

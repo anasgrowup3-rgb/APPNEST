@@ -80,7 +80,7 @@ The GitHub Actions workflow also checks Worker/Mini App JavaScript syntax and co
 
 Public: `GET /api/health`, `GET /api/apps`, `GET /api/categories`.
 
-Public account endpoints: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`. Sessions use Secure, HttpOnly, SameSite=Lax cookies with server-side revocation and 30-day expiry.\n\nAuthenticated: `GET/PATCH /api/me`, favorites, app versions, app downloads, ads/impressions/clicks, subscription status and feedback.
+Public account endpoints: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`. Sessions use Secure, HttpOnly, SameSite=Lax cookies with server-side revocation and 30-day expiry. Passwords are PBKDF2-SHA-256 hashes, not plaintext. The current implementation does not yet send email-verification or password-reset messages; configure an outbound email provider and implement those flows before treating email ownership as verified or enabling password recovery.\n\nAuthenticated: `GET/PATCH /api/me`, favorites, app versions, app downloads, ads/impressions/clicks, subscription status and feedback.
 
 Admin: app metadata/status/version history, multipart uploads, categories, channels and subscription mode, campaigns, users/blocking, notifications, feedback and audit events.
 

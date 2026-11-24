@@ -12,7 +12,8 @@ EXPECTED_TABLES = {
     "appnest_feedback", "appnest_notifications", "appnest_required_channels",
     "appnest_settings", "appnest_ad_campaigns", "appnest_admin_audit",
     "appnest_rate_limits", "appnest_upload_sessions", "appnest_upload_parts",
-    "appnest_ad_frequency", "appnest_download_tokens",
+    "appnest_ad_frequency", "appnest_download_tokens", "appnest_credentials",
+    "appnest_auth_sessions", "appnest_admins",
 }
 
 class MigrationSmokeTest(unittest.TestCase):
@@ -32,10 +33,14 @@ class MigrationSmokeTest(unittest.TestCase):
         self.db.executescript((ROOT / "0001_appnest.sql").read_text(encoding="utf-8"))
         self.db.execute("INSERT INTO users(telegram_id, first_name) VALUES('123', 'Existing')")
         self.db.executescript((ROOT / "0002_uploads_ads.sql").read_text(encoding="utf-8"))
+        self.db.executescript((ROOT / "0003_production_compat.sql").read_text(encoding="utf-8"))
+        self.db.executescript((ROOT / "0004_standalone_accounts.sql").read_text(encoding="utf-8"))
         row = self.db.execute(
             "SELECT telegram_id, first_name, language FROM users WHERE telegram_id='123'"
         ).fetchone()
         self.assertEqual(row, ("123", "Existing", "ru"))
+        self.db.execute("INSERT INTO appnest_credentials(user_id,email,password_salt,password_hash) VALUES(?,?,?,?)", ("123","existing@example.com","a"*32,"b"*64))
+        self.assertEqual(self.db.execute("SELECT email FROM appnest_credentials WHERE user_id='123'").fetchone()[0], "existing@example.com")
 
     def test_complete_schema_indexes_and_foreign_keys(self):
         self.apply_all()
@@ -49,7 +54,8 @@ class MigrationSmokeTest(unittest.TestCase):
         self.assertTrue({
             "idx_apps_status_created", "idx_apps_category", "idx_downloads_user",
             "idx_upload_sessions_expiry", "idx_ad_frequency_day",
-            "idx_download_tokens_expiry"
+            "idx_download_tokens_expiry", "idx_appnest_auth_sessions_user",
+            "idx_appnest_auth_sessions_expiry"
         } <= indexes)
 
     def test_worker_compatibility_tables_and_default_categories(self):

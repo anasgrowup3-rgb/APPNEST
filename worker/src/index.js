@@ -426,7 +426,7 @@ async function handle(request, env) {
       if(!env.BOT_TOKEN)return fail("BOT_TOKEN не настроен",503);
       const b=await readJson(request);
       let chat=clean(b.chat_id,120);
-      chat=chat.replace(/^https?:\\/\\/(t\\.me|telegram\\.me)\\//i,"").replace(/^@/,"").replace(/\\/$/,"");
+      chat=chat.replace("https://t.me/","").replace("http://t.me/","").replace("https://telegram.me/","").replace(/^@/,"").replace(/\/$/,"");
       if(!/^[A-Za-z0-9_]{5,32}$/.test(chat))return fail("Укажите публичный канал в формате @username или https://t.me/username");
       const [chatResponse,meResponse]=await Promise.all([
         fetch("https://api.telegram.org/bot"+env.BOT_TOKEN+"/getChat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:"@"+chat})}),

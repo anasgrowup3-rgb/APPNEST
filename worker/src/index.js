@@ -193,7 +193,7 @@ async function audit(env, actor, action, target, details = "") {
 async function subscriptionCheck(env, userId) {
   const { results = [] } = await env.DB.prepare("SELECT chat_id, title, invite_url FROM appnest_required_channels WHERE enabled=1").all();
   if (!results.length || env.TELEGRAM_SUBSCRIPTIONS_ENABLED !== "true") return { allowed: true, channels: [] };
-  if (!/^\\d+$/.test(String(userId)) || !Number.isSafeInteger(Number(userId))) {
+  if (!/^\d+$/.test(String(userId)) || !Number.isSafeInteger(Number(userId))) {
     return { allowed: false, unavailable: false, telegram_required: true, channels: results };
   }
   if (!env.BOT_TOKEN) return { allowed: false, unavailable: true, channels: results };

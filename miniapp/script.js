@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const API = (document.querySelector('meta[name="appnest-api-base"]')?.content || "https://appnest-api.anas-grow-up-3.workers.dev/api").replace(/\/+$/, "");
+  const API = new URL(document.querySelector('meta[name="appnest-api-base"]')?.content || "https://appnest-api.anas-grow-up-3.workers.dev/api", window.location.origin).href.replace(/\/+$/, "");
   const PAGE_SIZE = 12;
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];

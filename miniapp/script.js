@@ -199,6 +199,7 @@
         gate.classList.remove("open");
         await loadProfileData();
         await loadAds();
+        if(state.isAdmin&&new URLSearchParams(window.location.search).get("admin")==="1"){navigate("admin");window.history.replaceState({}, "", window.location.pathname);}
         toast(mode==="register"?"Аккаунт создан":"Вход выполнен");
       }catch(e){error.textContent=e.message||"Не удалось выполнить вход";}
       finally{button.disabled=false;}

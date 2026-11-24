@@ -173,7 +173,7 @@
         <div id="authNameWrap" hidden><label for="authName">Имя</label><input id="authName" name="name" maxlength="80" autocomplete="name" placeholder="Как тебя называть"></div>
         <label for="authEmail">Электронная почта</label><input id="authEmail" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="name@example.com">
         <label for="authPassword">Пароль</label><input id="authPassword" name="password" type="password" minlength="10" maxlength="128" required autocomplete="current-password" placeholder="Минимум 10 символов">
-        <button class="auth-submit" type="submit" id="authSubmit">Войти в APPNEST</button><button type="button" id="authGuest" class="auth-guest" style="width:100%;margin-top:10px;border:1px solid #3a3a4a;border-radius:12px;padding:13px;background:#191a26;color:#eee;font-weight:700">Продолжить как гость</button><button type="button" id="authRecovery" class="auth-guest" style="width:100%;margin-top:8px;border:1px solid #3a3a4a;border-radius:12px;padding:12px;background:transparent;color:#c9c7d8">Вход администратора по резервному коду</button>
+        <button class="auth-submit" type="submit" id="authSubmit">Войти в APPNEST</button><button type="button" id="authGuest" class="auth-guest" style="width:100%;margin-top:10px;border:1px solid #3a3a4a;border-radius:12px;padding:13px;background:#191a26;color:#eee;font-weight:700">Продолжить как гость</button><button type="button" id="authRecovery" class="auth-guest" style="width:100%;margin-top:8px;border:1px solid #3a3a4a;border-radius:12px;padding:12px;background:transparent;color:#c9c7d8">Вход администратора по резервному коду</button><button type="button" id="authTelegramAdmin" class="auth-guest" style="width:100%;margin-top:8px;border:1px solid rgba(169,156,255,.5);border-radius:12px;padding:12px;background:rgba(149,101,255,.12);color:#c9c7ff" >Войти администратором через Telegram</button>
         <div class="auth-error" id="authError" role="alert"></div>
       </form>
       <div class="auth-foot">Пароль хранится в виде криптографического хеша. Не используй пароль от других сервисов.</div>
@@ -216,6 +216,24 @@
       }catch(e){error.textContent=e.message||"Не удалось открыть гостевой доступ";}
       finally{button.disabled=false;}
     });
+    const telegramAdminButton=$("#authTelegramAdmin",gate);
+    if(telegramAdminButton){
+      telegramAdminButton.hidden=!initData;
+      telegramAdminButton.addEventListener("click",async()=>{
+        const error=$("#authError",gate);
+        telegramAdminButton.disabled=true;error.textContent="";
+        try{
+          await request("/auth/admin-telegram",{method:"POST",body:JSON.stringify({})});
+          gate.classList.remove("open");
+          await loadProfileData();
+          if(!state.isAdmin)throw new Error("Сервер не подтвердил права администратора");
+          navigate("admin");
+          window.history.replaceState({},"",window.location.pathname);
+          toast("Вход администратора выполнен");
+        }catch(e){error.textContent=e.message||"Не удалось войти администратором";}
+        finally{telegramAdminButton.disabled=false;}
+      });
+    }
     $("#authRecovery",gate).addEventListener("click",async()=>{const code=prompt("Введите одноразовый резервный код администратора");if(!code)return;const button=$("#authRecovery",gate),error=$("#authError",gate);button.disabled=true;error.textContent="";try{await request("/auth/admin-recovery",{method:"POST",body:JSON.stringify({code})});gate.classList.remove("open");await loadProfileData();if(state.isAdmin){navigate("admin");toast("Вход администратора выполнен");}else{throw new Error("У этой учётной записи нет прав администратора");}}catch(e){error.textContent=e.message||"Не удалось войти";}finally{button.disabled=false;}});
     gate.addEventListener("click",event=>{if(event.target===gate)event.preventDefault();});
     return gate;

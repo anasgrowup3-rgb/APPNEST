@@ -120,10 +120,12 @@ Initial categories: Productivity, Games, Tools, Other.
 - Worker: appnest-api; production D1 and R2 bindings are configured.
 - Production compatibility migration 0003_production_compat.sql created isolated appnest_* tables; legacy tables preserved.
 - Earlier static SQL validation passed for 95 SQL statements; CI previously passed 30 Worker tests + 19 migration tests.
-- Worker and Pages deployments were attempted. Pages returned 404 in user testing; Worker-hosted frontend route was discussed but must be independently smoke-tested before considered canonical.
-- Telegram menu-button setup returned HTTP 429 with retry_after; stop repeated requests until cooldown passes, then perform one controlled attempt.
-- Production catalogue currently has 0 apps. Do not present placeholder content as real published apps.
-- Menu-button URL and frontend/API origin alignment must be verified before launch.
+- Pages project appnest still has a user-reported 404; repeated identical Pages uploads are not a valid fix.
+- Worker-hosted frontend appnest-web is deployed at 100% traffic, workers.dev subdomain is enabled, and its embedded index.html/script.js/style.css were byte-for-byte compared with the current GitHub frontend (index.html uses the same-origin /api proxy). Its API proxy targets appnest-api. External HTTP smoke testing is still required because this execution environment blocks requests to the app's public hostnames.
+- Production API Worker was re-deployed from the exact GitHub main source. The temporary public __bot_setup route (which contained a query-key gate in source) is removed. D1, R2, ADMIN_IDS, ALLOWED_ORIGIN, and the BOT_TOKEN secret binding were verified unchanged.
+- Telegram menu-button setup previously returned HTTP 429; do not repeat until Telegram's rate limit has cleared, then make one controlled attempt using the appnest-web URL.
+- Production catalogue currently has 0 apps and no required subscription channels. Do not present placeholder content as real published apps.
+- External browser smoke test, Telegram WebView/menu button, real subscription check, and APK upload/download round trip remain release gates.
 
 ## Work log
 Append dated entries with: change, files/resources changed, tests run, result, known limitation, next concrete action.

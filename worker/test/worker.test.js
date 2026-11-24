@@ -25,7 +25,7 @@ class MockDB {
     };
   }
 }
-const env = () => ({ DB: new MockDB(), FILES: { get: async () => null }, BOT_TOKEN: TOKEN, ADMIN_IDS: "42", ALLOWED_ORIGIN: "https://mini.example" });
+const env = () => ({ DB: new MockDB(), FILES: { get: async () => null }, BOT_TOKEN: TOKEN, ADMIN_IDS: "42", ALLOWED_ORIGIN: "https://mini.example", TELEGRAM_SUBSCRIPTIONS_ENABLED: "true" });
 function signedInitData(userId = 42, ageSeconds = 0) {
   const authDate = Math.floor(Date.now() / 1000) - ageSeconds;
   const params = new URLSearchParams({

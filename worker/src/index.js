@@ -100,7 +100,7 @@ async function subscriptionCheck(env, userId) {
 }
 async function logDownload(env, userId, appId) {
   await env.DB.prepare("INSERT INTO appnest_downloads (user_id, app_id) VALUES (?, ?)").bind(userId, appId).run();
-  await env.DB.prepare("UPDATE appnest_apps SET appnest_downloads=appnest_downloads+1 WHERE id=?").bind(appId).run();
+  await env.DB.prepare("UPDATE appnest_apps SET downloads=downloads+1 WHERE id=?").bind(appId).run();
 }
 
 
@@ -161,7 +161,7 @@ async function handle(request, env) {
   if (path === "/apps" && method === "GET") {
     const category = clean(url.searchParams.get("category"), 80);
     const query = clean(url.searchParams.get("q"), 100);
-    let sql = "SELECT id,title,description,developer,category,version,version_code,min_android,size_bytes,icon_key,banner_key,screenshots_json,appnest_downloads,created_at,updated_at FROM appnest_apps WHERE status='published'";
+    let sql = "SELECT id,title,description,developer,category,version,version_code,min_android,size_bytes,icon_key,banner_key,screenshots_json,downloads,created_at,updated_at FROM appnest_apps WHERE status='published'";
     const args = [];
     if (category) { sql += " AND category=?"; args.push(category); }
     if (query) { sql += " AND (title LIKE ? OR description LIKE ? OR developer LIKE ?)"; args.push("%"+query+"%","%"+query+"%","%"+query+"%"); }
@@ -476,7 +476,7 @@ async function handle(request, env) {
     }
 
     if (path === "/admin/users" && method === "GET") {
-      const {results=[]}=await env.DB.prepare("SELECT telegram_id,username,first_name,is_blocked,created_at,last_seen FROM users ORDER BY last_seen DESC LIMIT 200").all();
+      const {results=[]}=await env.DB.prepare("SELECT telegram_id,username,first_name,is_blocked,created_at,last_seen_at AS last_seen FROM users ORDER BY last_seen_at DESC LIMIT 200").all();
       return json({success:true,users:results});
     }
     if (path === "/admin/overview" && method === "GET") {
@@ -485,7 +485,7 @@ async function handle(request, env) {
         env.DB.prepare("SELECT COUNT(*) n FROM users").first(),
         env.DB.prepare("SELECT COUNT(*) n FROM appnest_downloads").first(),
         env.DB.prepare("SELECT id,user_id,message,created_at FROM appnest_feedback WHERE status='open' ORDER BY created_at DESC LIMIT 50").all(),
-        env.DB.prepare("SELECT id,title,description,category,version,appnest_downloads,status FROM appnest_apps ORDER BY created_at DESC LIMIT 100").all(),
+        env.DB.prepare("SELECT id,title,description,category,version,downloads,status FROM appnest_apps ORDER BY created_at DESC LIMIT 100").all(),
         env.DB.prepare("SELECT id,title,kind,creative_url,target_url,active,starts_at,ends_at,priority,impressions,clicks FROM appnest_ad_campaigns ORDER BY id DESC LIMIT 50").all(),
         env.DB.prepare("SELECT id,chat_id,title,invite_url,enabled FROM appnest_required_channels ORDER BY id").all(),
         env.DB.prepare("SELECT substr(created_at,1,10) day,COUNT(*) count FROM appnest_downloads GROUP BY substr(created_at,1,10) ORDER BY day DESC LIMIT 14").all(),

@@ -76,6 +76,18 @@ async function createGuestAccount(env) {
   return {user:await webUserById(env,userId),token};
 }
 async function authEndpoint(request,env,path,method) {
+  if(path==="/auth/admin-telegram"&&method==="POST"){
+    const ip=request.headers.get("CF-Connecting-IP")||"unknown";
+    if(await rateLimit(env,"admin-telegram:"+ip,5,900))return fail("Слишком много попыток. Подождите 15 минут.",429);
+    const tg=await verifyTelegram(request.headers.get("X-Telegram-Init-Data")||"",env.BOT_TOKEN,Number(env.TELEGRAM_AUTH_MAX_AGE||86400));
+    if(!tg||!(await webAdmin(env,tg.id)))return fail("Откройте APPNEST через Telegram-бота с главным аккаунтом администратора.",401);
+    await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name,last_name,photo_url) VALUES(?,?,?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username,first_name=excluded.first_name,last_name=excluded.last_name,photo_url=CASE WHEN excluded.photo_url<>'' THEN excluded.photo_url ELSE users.photo_url END").bind(tg.id,tg.username,tg.first_name,tg.last_name,tg.photo_url).run();
+    const blocked=await env.DB.prepare("SELECT is_blocked FROM users WHERE telegram_id=?").bind(tg.id).first();
+    if(blocked?.is_blocked)return fail("Доступ к сервису ограничен",403);
+    const token=await issueWebSession(env,tg.id);
+    await audit(env,tg.id,"admin.telegram_login","verified-initData");
+    return json({success:true,user:await webUserById(env,tg.id),is_admin:true},200,{"set-cookie":sessionCookie(token)});
+  }
   if(path==="/auth/guest"&&method==="POST"){
     const ip=request.headers.get("CF-Connecting-IP")||"unknown";
     if(await rateLimit(env,"guest:"+ip,10,3600))return fail("Слишком много гостевых сессий с этого подключения. Попробуйте позже.",429);

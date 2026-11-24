@@ -88,7 +88,7 @@ async function authEndpoint(request,env,path,method) {
     const derived=await passwordHash(password);
     await env.DB.prepare("INSERT INTO appnest_credentials(user_id,email,password_salt,password_hash) VALUES(?,?,?,?)").bind(userId,email,derived.salt,derived.hash).run();
     const token=await issueWebSession(env,userId),user=await webUserById(env,userId);
-    return json({success:true,user,is_admin:await webAdmin(env,userId)},{headers:{}} ,{ "set-cookie":sessionCookie(token) });
+    return json({success:true,user,is_admin:await webAdmin(env,userId)},201,{"set-cookie":sessionCookie(token)});
   }
   if(path==="/auth/login"&&method==="POST"){
     const b=await readJson(request),email=clean(b.email,254).toLowerCase(),password=typeof b.password==="string"?b.password:"";
@@ -163,7 +163,7 @@ async function audit(env, actor, action, target, details = "") {
 }
 async function subscriptionCheck(env, userId) {
   const { results = [] } = await env.DB.prepare("SELECT chat_id, title, invite_url FROM appnest_required_channels WHERE enabled=1").all();
-  if (!results.length || String(userId).startsWith("web_")) return { allowed: true, channels: [] };
+  if (!results.length || env.TELEGRAM_SUBSCRIPTIONS_ENABLED !== "true") return { allowed: true, channels: [] };
   if (!env.BOT_TOKEN) return { allowed: false, unavailable: true, channels: results };
   const checks = await Promise.all(results.map(async channel => {
     try {

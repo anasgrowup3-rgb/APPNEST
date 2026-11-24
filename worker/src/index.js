@@ -277,6 +277,30 @@ async function handle(request, env) {
     if(!session.isAdmin) return fail("Недостаточно прав",403);
     const admin = session;
 
+    if (path === "/admin/telegram/menu-button" && method === "POST") {
+      if (!env.BOT_TOKEN) return fail("BOT_TOKEN не настроен", 503);
+      const telegramResponse = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/setChatMenuButton", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          menu_button: {
+            type: "web_app",
+            text: "Открыть APPNEST",
+            web_app: { url: "https://appnest-web.anas-grow-up-3.workers.dev/" }
+          }
+        })
+      });
+      const telegramResult = await telegramResponse.json().catch(() => ({}));
+      if (!telegramResponse.ok || !telegramResult.ok) {
+        const retry = telegramResult.parameters?.retry_after;
+        const message = clean(telegramResult.description || "Не удалось настроить кнопку Telegram", 300);
+        return fail(retry ? message + " (повторите через " + retry + " сек.)" : message, telegramResponse.status === 429 ? 429 : 502);
+      }
+      await audit(env, userId, "telegram.menu_button", "appnest-web");
+      return json({ success: true, text: "Открыть APPNEST" });
+    }
+
+
     if (path === "/admin/categories" && method === "GET") {
       const {results=[]}=await env.DB.prepare("SELECT id,slug,title,icon,sort_order FROM appnest_categories ORDER BY sort_order,title").all();
       return json({success:true,categories:results});

@@ -14,6 +14,7 @@ Configure these on the existing Worker in the Cloudflare dashboard (or in the ex
 - Optional **MAX_APK_BYTES** — maximum multipart APK size, default 2 GiB.
 - Optional **MAX_DIRECT_APK_BYTES** — legacy single-request upload limit, default 16 MiB. The current Mini App uses resumable multipart uploads instead.
 - Optional **TELEGRAM_AUTH_MAX_AGE** — Telegram initData maximum age in seconds, default 86400.
+- Optional **TELEGRAM_SUBSCRIPTIONS_ENABLED** — set to `true` only if Telegram channel-membership enforcement is intentionally required. It is off by default for standalone accounts.
 
 The repository's `worker/wrangler.jsonc` includes an hourly cleanup Cron trigger and deliberately does not contain fabricated D1 database IDs or R2 bucket names. Add the actual identifiers once the resources exist. The binding names must remain exactly `DB` and `FILES`.
 
@@ -29,6 +30,8 @@ npx wrangler d1 migrations apply <YOUR_DATABASE_NAME> --remote
 
 - `migrations/0001_appnest.sql` — base catalog, users, favorites, downloads, channels, ads and audit schema.
 - `migrations/0002_uploads_ads.sql` — multipart session/part tracking, per-user ad frequency and persisted language; seeds the existing four categories.
+- `migrations/0003_production_compat.sql` — production compatibility tables used by the deployed Worker.
+- `migrations/0004_standalone_accounts.sql` — email/password credentials, revocable HttpOnly-cookie sessions and explicit admin grants. Existing Telegram user IDs and foreign keys are retained.
 
 The migration smoke test uses an in-memory SQLite database and verifies that an existing user row survives both migrations. It is not a substitute for applying migrations to the actual Cloudflare D1 database.
 
@@ -48,7 +51,7 @@ APK updates append an `app_versions` row and switch the app's current APK key on
 ## Download and subscription security
 
 - The R2 bucket must remain private; never attach a public URL to an APK object.
-- APK downloads stream through the Worker only after Telegram initData validation and successful `getChatMember` checks.
+- APK downloads stream through the Worker only after a valid APPNEST account session (or legacy Telegram initData during transition). Telegram channel checks are disabled by default; they are used only when `TELEGRAM_SUBSCRIPTIONS_ENABLED=true` is explicitly configured.
 - Telegram API failures deny the download (fail closed).
 - The bot must be an administrator in each required channel.
 - SHA-256 and ZIP structure signatures provide integrity/type checks, not a malware verdict or guarantee that an APK is safe to install.
@@ -77,7 +80,7 @@ The GitHub Actions workflow also checks Worker/Mini App JavaScript syntax and co
 
 Public: `GET /api/health`, `GET /api/apps`, `GET /api/categories`.
 
-Authenticated: `GET/PATCH /api/me`, favorites, app versions, app downloads, ads/impressions/clicks, subscription status and feedback.
+Public account endpoints: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`. Sessions use Secure, HttpOnly, SameSite=Lax cookies with server-side revocation and 30-day expiry.\n\nAuthenticated: `GET/PATCH /api/me`, favorites, app versions, app downloads, ads/impressions/clicks, subscription status and feedback.
 
 Admin: app metadata/status/version history, multipart uploads, categories, channels and subscription mode, campaigns, users/blocking, notifications, feedback and audit events.
 

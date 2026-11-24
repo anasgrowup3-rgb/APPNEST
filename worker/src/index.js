@@ -43,7 +43,7 @@ function cookieValue(request,name) {
   for(const part of raw.split(";")){const i=part.indexOf("=");if(i<0)continue;if(part.slice(0,i).trim()===name)return decodeURIComponent(part.slice(i+1).trim());}
   return "";
 }
-function sessionCookie(token,maxAge=2592000){return `appnest_session=${encodeURIComponent(token)}; Path=/api; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;}
+function sessionCookie(token,maxAge=2592000){return `appnest_session=${encodeURIComponent(token)}; Path=/api; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=None`;}
 async function passwordHash(password,saltHex) {
   const salt=saltHex?Uint8Array.from(saltHex.match(/../g).map(x=>parseInt(x,16))):crypto.getRandomValues(new Uint8Array(16));
   const key=await crypto.subtle.importKey("raw",encoder.encode(password),"PBKDF2",false,["deriveBits"]);

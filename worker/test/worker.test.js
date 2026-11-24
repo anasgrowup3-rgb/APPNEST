@@ -85,7 +85,7 @@ test("user routes reject missing or forged Telegram initData", async () => {
   assert.equal((await call("/me", { initData: "user=%7B%7D&hash=bad" })).status, 401);
 });
 test("new admin security routes reject unauthenticated and non-admin callers", async () => {
-  for (const [method,path] of [["GET","/admin/diagnostics"],["POST","/admin/diagnostics/channel"],["POST","/admin/recovery-codes"],["DELETE","/admin/recovery-codes"]]) {
+  for (const [method,path] of [["GET","/admin/diagnostics"],["POST","/admin/diagnostics/channel"],["GET","/admin/subscriptions-enabled"],["PUT","/admin/subscriptions-enabled"],["POST","/admin/recovery-codes"],["DELETE","/admin/recovery-codes"]]) {
     const options=method==="GET"?{method}:{method,body:{}};
     assert.equal((await call(path,options)).status,401);
     assert.equal((await call(path,{...options,initData:signedInitData(7)})).status,403);
@@ -300,7 +300,7 @@ test("CORS supports an explicit allowlist of multiple Mini App origins", async (
 
 test("every registered admin route rejects unauthenticated and non-admin callers", async () => {
   const routes = [
-    ["GET","/admin/categories"],["POST","/admin/categories"],["PATCH","/admin/categories/1"],["DELETE","/admin/categories/1"],
+    ["GET","/admin/categories"],["POST","/admin/categories"],["GET","/admin/subscriptions-enabled"],["PUT","/admin/subscriptions-enabled"],["PATCH","/admin/categories/1"],["DELETE","/admin/categories/1"],
     ["POST","/admin/uploads"],["PUT","/admin/uploads/upload-1/parts"],["POST","/admin/uploads/upload-1/complete"],["DELETE","/admin/uploads/upload-1"],
     ["GET","/admin/apps/1/versions"],["PATCH","/admin/channels/1"],["DELETE","/admin/channels/1"],
     ["PATCH","/admin/ads/1"],["DELETE","/admin/ads/1"],["GET","/admin/notifications"],["PATCH","/admin/notifications/1"],

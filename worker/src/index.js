@@ -718,7 +718,7 @@ export default {
     const origin = request.headers.get("Origin");
     const allowedOrigins = [...(env.ALLOWED_ORIGINS || "").split(","), ...(env.ALLOWED_ORIGIN || "").split(","), "https://appnest-web.anas-grow-up-3.workers.dev"]
       .map(value => value.trim()).filter(Boolean);
-    const cors = { "vary": "Origin" };
+    const cors = { "vary": "Origin", "access-control-allow-credentials": "true" };
     if (origin && allowedOrigins.includes(origin)) cors["access-control-allow-origin"] = origin;
     try {
       const response = await handle(request,env);

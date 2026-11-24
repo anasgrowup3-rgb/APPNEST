@@ -348,7 +348,7 @@ async function handle(request, env) {
     const app=await env.DB.prepare("SELECT id,apk_key FROM appnest_apps WHERE id=? AND status='published' AND apk_key IS NOT NULL").bind(appId).first();
     if(!app) return fail("Приложение не найдено",404);
     const subs=await subscriptionCheck(env,userId);
-    if(!subs.allowed) return json({success:false,error:subs.unavailable?"Не удалось проверить подписки. Повторите попытку позже.":"Для скачивания необходимо подписаться на каналы",subscription_required:true,mode:subs.unavailable?"unavailable":"required",channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed}))},403);
+    if(!subs.allowed) return json({success:false,error:subs.telegram_required?"Для проверки подписки войдите в APPNEST через Telegram.":(subs.unavailable?"Не удалось проверить подписки. Повторите попытку позже.":"Для скачивания необходимо подписаться на каналы"),subscription_required:true,telegram_required:subs.telegram_required===true,mode:subs.telegram_required?"telegram_required":(subs.unavailable?"unavailable":"required"),channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed}))},403);
     const bytes=crypto.getRandomValues(new Uint8Array(32)),token=hex(bytes),hash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(token))),expiry=Math.floor(Date.now()/1000)+60;
     await env.DB.prepare("INSERT INTO appnest_download_tokens(token_hash,user_id,app_id,expires_at) VALUES(?,?,?,?)").bind(hash,userId,appId,expiry).run();
     return json({success:true,url:"/api/download/"+token,expires_at:expiry});
@@ -358,7 +358,7 @@ async function handle(request, env) {
     const app = await env.DB.prepare("SELECT id,apk_key,apk_sha256,title FROM appnest_apps WHERE id=? AND status='published'").bind(appId).first();
     if (!app || !app.apk_key) return fail("Приложение не найдено",404);
     const subs = await subscriptionCheck(env,userId);
-    if (!subs.allowed) return json({ success:false, error:subs.unavailable ? "Не удалось проверить подписки. Повторите попытку позже." : "Для скачивания необходимо подписаться на каналы", subscription_required:true, mode:subs.unavailable ? "unavailable" : "required", channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed})) },403);
+    if (!subs.allowed) return json({ success:false, error:subs.telegram_required ? "Для проверки подписки войдите в APPNEST через Telegram." : (subs.unavailable ? "Не удалось проверить подписки. Повторите попытку позже." : "Для скачивания необходимо подписаться на каналы"), subscription_required:true, telegram_required:subs.telegram_required===true, mode:subs.telegram_required ? "telegram_required" : (subs.unavailable ? "unavailable" : "required"), channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed})) },403);
     if (!env.FILES) return fail("R2 binding FILES не настроен",503);
     const object = await env.FILES.get(app.apk_key);
     if (!object) return fail("APK-файл временно недоступен",404);

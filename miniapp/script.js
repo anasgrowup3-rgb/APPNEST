@@ -171,7 +171,7 @@
         <div id="authNameWrap" hidden><label for="authName">Имя</label><input id="authName" name="name" maxlength="80" autocomplete="name" placeholder="Как тебя называть"></div>
         <label for="authEmail">Электронная почта</label><input id="authEmail" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="name@example.com">
         <label for="authPassword">Пароль</label><input id="authPassword" name="password" type="password" minlength="10" maxlength="128" required autocomplete="current-password" placeholder="Минимум 10 символов">
-        <button class="auth-submit" type="submit" id="authSubmit">Войти в APPNEST</button>
+        <button class="auth-submit" type="submit" id="authSubmit">Войти в APPNEST</button><button type="button" id="authGuest" class="auth-guest" style="width:100%;margin-top:10px;border:1px solid #3a3a4a;border-radius:12px;padding:13px;background:#191a26;color:#eee;font-weight:700">Продолжить как гость</button>
         <div class="auth-error" id="authError" role="alert"></div>
       </form>
       <div class="auth-foot">Пароль хранится в виде криптографического хеша. Не используй пароль от других сервисов.</div>
@@ -199,6 +199,18 @@
         await loadAds();
         toast(mode==="register"?"Аккаунт создан":"Вход выполнен");
       }catch(e){error.textContent=e.message||"Не удалось выполнить вход";}
+      finally{button.disabled=false;}
+    });
+    $("#authGuest",gate).addEventListener("click",async()=>{
+      const button=$("#authGuest",gate),error=$("#authError",gate);
+      button.disabled=true;error.textContent="";
+      try{
+        await request("/auth/guest",{method:"POST",body:JSON.stringify({})});
+        gate.classList.remove("open");
+        await loadProfileData();
+        await loadAds();
+        toast("Гостевой доступ открыт");
+      }catch(e){error.textContent=e.message||"Не удалось открыть гостевой доступ";}
       finally{button.disabled=false;}
     });
     gate.addEventListener("click",event=>{if(event.target===gate)event.preventDefault();});

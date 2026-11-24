@@ -146,3 +146,11 @@ Append dated entries with: change, files/resources changed, tests run, result, k
 - Result: production temporary setup route removed; Worker secrets and storage bindings preserved; Worker-hosted frontend content and routing configuration verified.
 - Limitation: direct HTTP requests to public Workers/Pages hostnames are blocked in this execution environment, so browser status cannot be claimed. Pages project still has a user-reported 404; Telegram menu-button API previously returned 429. Production catalogue remains empty.
 - Next: externally open `https://appnest-web.anas-grow-up-3.workers.dev/`, then complete Telegram menu-button setup after the Telegram rate limit clears; only publish apps after source, package, signing, and distribution checks.
+
+ 
+### 2026-11-24 — admin login diagnosis and fix
+- Change: `auth()` in `worker/src/index.js` now lets verified Telegram initData of a configured administrator take precedence over an existing non-admin (guest/e-mail) cookie session. API path normalisation tolerates a duplicated `/api` prefix. `/api/health` reports `features.admin_telegram_login`.
+- Tests: Added regression tests for the admin Telegram login endpoint, ADMIN_IDS string/number comparison, duplicated API prefix, and admin-vs-guest-cookie precedence. Automated execution of the new tests has not yet been confirmed.
+- Deployment: Updated production Worker `appnest-api` through the content-only endpoint, which preserves Worker configuration and bindings. Cloudflare accepted the update and returned deployment `6647bf53b68248eabd9aba4729f5a94c`.
+- Limitation: External HTTP smoke test is blocked in this execution environment; the live `/api/health` response still needs to be checked from a normal browser.
+- Next: Open `https://appnest-web.anas-grow-up-3.workers.dev/` inside `@Appnest1_bot` and verify the admin panel.

@@ -68,7 +68,20 @@ async function webAdmin(env,userId) {
   const row=await env.DB.prepare("SELECT user_id FROM appnest_admins WHERE user_id=?").bind(String(userId)).first();
   return !!row;
 }
+async function createGuestAccount(env) {
+  const userId="guest_"+crypto.randomUUID();
+  const name="Гость";
+  await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name) VALUES(?,?,?)").bind(userId,"",name).run();
+  const token=await issueWebSession(env,userId);
+  return {user:await webUserById(env,userId),token};
+}
 async function authEndpoint(request,env,path,method) {
+  if(path==="/auth/guest"&&method==="POST"){
+    const ip=request.headers.get("CF-Connecting-IP")||"unknown";
+    if(await rateLimit(env,"guest:"+ip,10,3600))return fail("Слишком много гостевых сессий с этого подключения. Попробуйте позже.",429);
+    const account=await createGuestAccount(env);
+    return json({success:true,user:account.user,is_admin:false,guest:true},201,{"set-cookie":sessionCookie(account.token)});
+  }
   if(path==="/auth/register"&&method==="POST"){
     const b=await readJson(request),email=clean(b.email,254).toLowerCase(),password=typeof b.password==="string"?b.password:"",name=clean(b.name,80);
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return fail("Укажите корректную почту");

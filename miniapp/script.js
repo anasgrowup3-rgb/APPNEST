@@ -494,6 +494,16 @@
       if($("#languageSelect")) $("#languageSelect").value=state.language;
       state.user = data.user || null;
       state.isAdmin = data.is_admin === true;
+      // Confirm admin access against the protected API as a fallback.
+      // The server remains the authority; this never grants client-side permissions.
+      if (!state.isAdmin) {
+        try {
+          await request("/admin/overview");
+          state.isAdmin = true;
+        } catch (_) {
+          state.isAdmin = false;
+        }
+      }
       state.favorites = new Set((data.favorites || []).map(String));
       state.history = data.history || [];
       state.notifications = data.notifications || [];

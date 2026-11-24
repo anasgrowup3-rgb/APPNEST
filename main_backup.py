@@ -1,3 +1,6 @@
+# Archived legacy bot implementation. Do not execute: its direct Telegram file delivery bypasses APPNEST Worker subscription and download-ticket controls.
+raise RuntimeError("Archived legacy bot entrypoint disabled; use main.py")
+
 
 import os
 import sqlite3

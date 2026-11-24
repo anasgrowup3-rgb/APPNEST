@@ -2,5 +2,10 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "appnest-api",
   "main": "src/index.js",
-  "compatibility_date": "2026-11-22"
+  "compatibility_date": "2026-11-22",
+  "triggers": {
+    "crons": [
+      "0 * * * *"
+    ]
+  }
 }

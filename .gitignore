@@ -15,3 +15,11 @@ backups/
 *.sqlite3
 
 .DS_Store
+
+# Local Cloudflare Worker secrets
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+.env.integration
+worker/wrangler.integration.local.jsonc

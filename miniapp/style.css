@@ -1208,3 +1208,48 @@ h1, h2, h3 {
     transition-duration: .01ms !important;
   }
 }
+
+/* APPNEST admin, multipart progress and media gallery */
+#uploadProgress{display:block;height:10px;margin:12px 0;border:0;border-radius:999px;overflow:hidden;accent-color:var(--accent,#8b5cf6)}
+#uploadStatus{font-size:13px;color:var(--muted,#999);margin:6px 0 14px}
+.admin-extra-tabs{display:flex;gap:8px;overflow-x:auto;padding:12px 0;position:sticky;top:0;z-index:2;background:var(--surface,#111)}
+.admin-extra-tabs button,.admin-actions button,.admin-feedback button,[data-channel-toggle],[data-user-block],[data-ad-toggle],[data-feedback-resolve]{border:1px solid var(--border,rgba(255,255,255,.12));border-radius:10px;padding:8px 12px;background:var(--card,#1b1b25);color:inherit;font:inherit;cursor:pointer}
+.admin-extra-tabs button:focus-visible,.admin-actions button:focus-visible{outline:2px solid var(--accent,#8b5cf6);outline-offset:2px}
+#adminExtras section{padding:14px 0;border-bottom:1px solid var(--border,rgba(255,255,255,.1))}
+#adminExtras form{display:grid;gap:10px;margin:12px 0}
+#adminExtras input,#adminExtras select,#adminExtras textarea{width:100%;min-width:0;padding:12px;border:1px solid var(--border,rgba(255,255,255,.14));border-radius:10px;background:var(--card,#1b1b25);color:inherit;font:inherit}
+#adminExtras button[type=submit],#adminExtras form button{padding:11px 14px;border:0;border-radius:10px;background:var(--accent,#7655e8);color:white;font:inherit;font-weight:600}
+.admin-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.admin-app-row{align-items:center}
+.admin-feedback{padding:12px;margin:10px 0;border:1px solid var(--border,rgba(255,255,255,.1));border-radius:12px}
+.details-banner{display:block;width:100%;max-height:220px;object-fit:cover;border-radius:16px;margin:16px 0}
+.screenshots{display:flex;gap:10px;overflow-x:auto;padding:12px 0}
+.screenshots img{width:auto;max-width:75%;height:220px;object-fit:contain;border-radius:12px;background:var(--card,#1b1b25)}
+#adminExtras [hidden]{display:none!important}
+@media(max-width:480px){.admin-actions button{font-size:12px;padding:7px 9px}.screenshots img{height:190px}}
+
+.ad-slot{display:grid;gap:10px;margin:12px 0 20px}
+.ad-card{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:14px;border:1px solid var(--border,rgba(255,255,255,.12));border-radius:14px;background:var(--card,#191923);color:inherit;text-decoration:none}
+.ad-card img{grid-column:1/-1;width:100%;max-height:160px;object-fit:cover;border-radius:9px}
+.ad-label{grid-column:1/-1;width:max-content;padding:3px 7px;border-radius:5px;background:rgba(145,110,255,.18);font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+.ad-card strong{font-size:14px}.ad-card>span:last-child{font-size:12px;color:var(--muted,#aaa)}
+
+.admin-extras{margin-top:18px;padding:16px;border:1px solid var(--border,rgba(255,255,255,.1));border-radius:16px;background:var(--card,rgba(255,255,255,.025))}
+.admin-extras [data-extra-panel]{padding-top:14px}
+.admin-extras [data-extra-panel][hidden]{display:none}
+.admin-extras form{display:grid;gap:10px;margin:12px 0}
+.admin-extras form input,.admin-extras form textarea,.admin-extras form select{width:100%;min-width:0}
+.admin-extra-tabs{display:flex;gap:8px;flex-wrap:wrap}
+
+/* Admin analytics and audit log */
+.admin-metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.admin-metric-grid p{padding:12px;border:1px solid var(--border,rgba(255,255,255,.1));border-radius:12px;background:var(--surface,#111)}
+.admin-chart{display:grid;gap:9px;margin:12px 0 22px}
+.admin-chart-row{display:grid;grid-template-columns:86px minmax(40px,1fr) 34px;gap:9px;align-items:center;font-size:12px}
+.admin-chart-row>span{color:var(--muted,#999)}
+.admin-chart-row>strong{text-align:right;font-variant-numeric:tabular-nums}
+.admin-chart-track{height:9px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+.admin-chart-track i{display:block;height:100%;border-radius:inherit;background:var(--accent,#8b5cf6)}
+.admin-audit-row{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:12px 0;border-bottom:1px solid var(--border,rgba(255,255,255,.1))}
+.admin-audit-row span{color:var(--muted,#999);overflow-wrap:anywhere}
+.admin-audit-row small{grid-column:1/-1;color:var(--muted,#999)}

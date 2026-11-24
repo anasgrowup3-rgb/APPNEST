@@ -1,0 +1,29 @@
+name: APPNEST validation
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feat/appnest-stable-api]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Worker and Mini App syntax
+        run: |
+          node --check worker/src/index.js
+          node --check miniapp/script.js
+          node --check worker/test/real-integration.mjs
+          python -m py_compile main.py
+      - name: Worker tests
+        working-directory: worker
+        run: npm test
+      - name: D1 migration smoke test
+        working-directory: worker
+        run: python -m unittest discover -s test -p '*_test.py' -v

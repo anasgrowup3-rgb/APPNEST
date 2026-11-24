@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "appnest-integration-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-22",
+  "workers_dev": true,
+  "vars": {
+    "ADMIN_IDS": "REPLACE_WITH_TEST_ADMIN_TELEGRAM_ID",
+    "ALLOWED_ORIGIN": "https://REPLACE_WITH_TEST_MINIAPP_HOST"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "appnest-integration-db",
+      "database_id": "REPLACE_WITH_DISPOSABLE_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "appnest-integration-files"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 * * * *"]
+  }
+}

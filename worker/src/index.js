@@ -49,9 +49,9 @@ async function rateLimit(env, key, limit = 60, windowSeconds = 60) {
   if (!env.DB) return false;
   const bucket = Math.floor(Date.now() / 1000 / windowSeconds);
   const id = `${key}:${bucket}`;
-  await env.DB.prepare("INSERT INTO rate_limits (key, count, expires_at) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET count=count+1").bind(id, (bucket + 2) * windowSeconds).run();
-  const row = await env.DB.prepare("SELECT count FROM rate_limits WHERE key=?").bind(id).first();
-  if (bucket % 10 === 0) await env.DB.prepare("DELETE FROM rate_limits WHERE expires_at < ?").bind(Math.floor(Date.now()/1000)).run();
+  await env.DB.prepare("INSERT INTO appnest_rate_limits (key, count, expires_at) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET count=count+1").bind(id, (bucket + 2) * windowSeconds).run();
+  const row = await env.DB.prepare("SELECT count FROM appnest_rate_limits WHERE key=?").bind(id).first();
+  if (bucket % 10 === 0) await env.DB.prepare("DELETE FROM appnest_rate_limits WHERE expires_at < ?").bind(Math.floor(Date.now()/1000)).run();
   return (row?.count || 0) > limit;
 }
 async function auth(request, env) {
@@ -62,7 +62,7 @@ async function auth(request, env) {
   if (await rateLimit(env, "user:" + user.id, uploadPartRequest ? 600 : 120)) return { error: fail("Слишком много запросов", 429) };
   const blocked = await env.DB.prepare("SELECT is_blocked FROM users WHERE telegram_id=?").bind(user.id).first();
   if (blocked?.is_blocked) return { error: fail("Доступ к сервису ограничен", 403) };
-  await env.DB.prepare("INSERT INTO users (telegram_id, username, first_name, last_name, photo_url, last_seen) VALUES (?, ?, ?, ?, ?, datetime('now')) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, last_name=excluded.last_name, photo_url=excluded.photo_url, last_seen=datetime('now')").bind(user.id,user.username,user.first_name,user.last_name,user.photo_url).run();
+  await env.DB.prepare("INSERT INTO users (telegram_id, username, first_name, last_name) VALUES (?, ?, ?, ?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, last_name=excluded.last_name").bind(user.id,user.username,user.first_name,user.last_name).run();
   const adminIds = (env.ADMIN_IDS || "").split(",").map(x => x.trim()).filter(Boolean);
   return { user, isAdmin: adminIds.includes(user.id) };
 }
@@ -73,10 +73,10 @@ async function adminAuth(request, env) {
   return session;
 }
 async function audit(env, actor, action, target, details = "") {
-  await env.DB.prepare("INSERT INTO admin_audit (actor_id, action, target, details) VALUES (?, ?, ?, ?)").bind(actor, action, target, clean(details, 1000)).run();
+  await env.DB.prepare("INSERT INTO appnest_admin_audit (actor_id, action, target, details) VALUES (?, ?, ?, ?)").bind(actor, action, target, clean(details, 1000)).run();
 }
 async function subscriptionCheck(env, userId) {
-  const { results = [] } = await env.DB.prepare("SELECT chat_id, title, invite_url FROM required_channels WHERE enabled=1").all();
+  const { results = [] } = await env.DB.prepare("SELECT chat_id, title, invite_url FROM appnest_required_channels WHERE enabled=1").all();
   if (!results.length) return { allowed: true, channels: [] };
   if (!env.BOT_TOKEN) return { allowed: false, unavailable: true, channels: results };
   const checks = await Promise.all(results.map(async channel => {
@@ -92,15 +92,15 @@ async function subscriptionCheck(env, userId) {
       return { ...channel, subscribed: ["creator","administrator","member"].includes(status) || (status === "restricted" && payload.result?.is_member === true) };
     } catch { return { ...channel, subscribed: false, unavailable: true }; }
   }));
-  const mode = await env.DB.prepare("SELECT value FROM settings WHERE key='subscription_mode'").first();
+  const mode = await env.DB.prepare("SELECT value FROM appnest_settings WHERE key='subscription_mode'").first();
   const any = mode?.value === "any";
   const unavailable = checks.some(x => x.unavailable);
   const allowed = !unavailable && (any ? checks.some(x => x.subscribed) : checks.every(x => x.subscribed));
   return { allowed, unavailable, channels: checks };
 }
 async function logDownload(env, userId, appId) {
-  await env.DB.prepare("INSERT INTO downloads (user_id, app_id) VALUES (?, ?)").bind(userId, appId).run();
-  await env.DB.prepare("UPDATE apps SET downloads=downloads+1 WHERE id=?").bind(appId).run();
+  await env.DB.prepare("INSERT INTO appnest_downloads (user_id, app_id) VALUES (?, ?)").bind(userId, appId).run();
+  await env.DB.prepare("UPDATE appnest_apps SET appnest_downloads=appnest_downloads+1 WHERE id=?").bind(appId).run();
 }
 
 
@@ -140,11 +140,11 @@ async function createMultipart(env,key,type) {
   return await env.FILES.createMultipartUpload(key,{httpMetadata:{contentType:type}});
 }
 async function uploadOwner(env,id,userId) {
-  return await env.DB.prepare("SELECT * FROM upload_sessions WHERE id=? AND owner_id=? AND status='open' AND expires_at>?").bind(id,userId,Math.floor(Date.now()/1000)).first();
+  return await env.DB.prepare("SELECT * FROM appnest_upload_sessions WHERE id=? AND owner_id=? AND status='open' AND expires_at>?").bind(id,userId,Math.floor(Date.now()/1000)).first();
 }
 async function mediaObject(env,key) {
   if(typeof key!=="string"||(!key.startsWith("media/")&&!key.startsWith("icons/"))||key.length>200) return null;
-  const {results=[]}=await env.DB.prepare("SELECT icon_key,banner_key,screenshots_json FROM apps WHERE status='published' AND (icon_key=? OR banner_key=? OR instr(screenshots_json,?)>0)").bind(key,key,key).all();
+  const {results=[]}=await env.DB.prepare("SELECT icon_key,banner_key,screenshots_json FROM appnest_apps WHERE status='published' AND (icon_key=? OR banner_key=? OR instr(screenshots_json,?)>0)").bind(key,key,key).all();
   const referenced=results.some(app=>app.icon_key===key||app.banner_key===key||safeArray(app.screenshots_json).includes(key));
   if(!referenced) return null;
   return await env.FILES.get(key);
@@ -157,27 +157,27 @@ async function handle(request, env) {
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-methods": "GET,POST,PUT,DELETE,PATCH,OPTIONS", "access-control-allow-headers": "Content-Type,X-Telegram-Init-Data", "access-control-max-age": "86400" } });
   if (!env.DB) return fail("D1 binding DB не настроен", 503);
   if (path === "/health" && method === "GET") return json({ success: true, service: "APPNEST API", status: "online", storage: !!env.FILES });
-  if (path === "/categories" && method === "GET") { const {results=[]}=await env.DB.prepare("SELECT slug,title,icon FROM categories ORDER BY sort_order,title").all(); return json({success:true,categories:results}); }
-  if (path === "/apps" && method === "GET") {
+  if (path === "/appnest_categories" && method === "GET") { const {results=[]}=await env.DB.prepare("SELECT slug,title,icon FROM appnest_categories ORDER BY sort_order,title").all(); return json({success:true,appnest_categories:results}); }
+  if (path === "/appnest_apps" && method === "GET") {
     const category = clean(url.searchParams.get("category"), 80);
     const query = clean(url.searchParams.get("q"), 100);
-    let sql = "SELECT id,title,description,developer,category,version,version_code,min_android,size_bytes,icon_key,banner_key,screenshots_json,downloads,created_at,updated_at FROM apps WHERE status='published'";
+    let sql = "SELECT id,title,description,developer,category,version,version_code,min_android,size_bytes,icon_key,banner_key,screenshots_json,appnest_downloads,created_at,updated_at FROM appnest_apps WHERE status='published'";
     const args = [];
     if (category) { sql += " AND category=?"; args.push(category); }
     if (query) { sql += " AND (title LIKE ? OR description LIKE ? OR developer LIKE ?)"; args.push("%"+query+"%","%"+query+"%","%"+query+"%"); }
     sql += " ORDER BY created_at DESC LIMIT 100";
     const { results = [] } = await env.DB.prepare(sql).bind(...args).all();
-    return json({ success: true, apps: results.map(a => ({ ...a, size: a.size_bytes ? (a.size_bytes / 1048576).toFixed(1) + " MB" : null, icon_url: a.icon_key ? "/api/media/" + encodeURIComponent(a.icon_key) : null, banner_url: a.banner_key ? "/api/media/" + encodeURIComponent(a.banner_key) : null, screenshots: safeArray(a.screenshots_json).map(key=>"/api/media/"+encodeURIComponent(key)) })) });
+    return json({ success: true, appnest_apps: results.map(a => ({ ...a, size: a.size_bytes ? (a.size_bytes / 1048576).toFixed(1) + " MB" : null, icon_url: a.icon_key ? "/api/media/" + encodeURIComponent(a.icon_key) : null, banner_url: a.banner_key ? "/api/media/" + encodeURIComponent(a.banner_key) : null, screenshots: safeArray(a.screenshots_json).map(key=>"/api/media/"+encodeURIComponent(key)) })) });
   }
   if (path.startsWith("/download/") && method === "GET") {
     const token=path.split("/")[2];
     if(!/^[a-f0-9]{64}$/.test(token)||!env.FILES) return fail("Ссылка на скачивание недействительна",404);
     const tokenHash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(token)));
-    const ticket=await env.DB.prepare("SELECT user_id,app_id FROM download_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at>?").bind(tokenHash,Math.floor(Date.now()/1000)).first();
+    const ticket=await env.DB.prepare("SELECT user_id,app_id FROM appnest_download_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at>?").bind(tokenHash,Math.floor(Date.now()/1000)).first();
     if(!ticket) return fail("Ссылка истекла или уже использована",410);
-    const consumed=await env.DB.prepare("UPDATE download_tokens SET used_at=datetime('now') WHERE token_hash=? AND used_at IS NULL AND expires_at>?").bind(tokenHash,Math.floor(Date.now()/1000)).run();
+    const consumed=await env.DB.prepare("UPDATE appnest_download_tokens SET used_at=datetime('now') WHERE token_hash=? AND used_at IS NULL AND expires_at>?").bind(tokenHash,Math.floor(Date.now()/1000)).run();
     if(!consumed.meta?.changes) return fail("Ссылка уже использована",410);
-    const app=await env.DB.prepare("SELECT id,apk_key FROM apps WHERE id=? AND status='published'").bind(ticket.app_id).first();
+    const app=await env.DB.prepare("SELECT id,apk_key FROM appnest_apps WHERE id=? AND status='published'").bind(ticket.app_id).first();
     if(!app) return fail("Приложение не найдено",404);
     const object=await env.FILES.get(app.apk_key);
     if(!object) return fail("APK-файл временно недоступен",404);
@@ -196,46 +196,46 @@ async function handle(request, env) {
   const userId = session.user.id;
   if (path === "/me" && method === "GET") {
     const [favs, history, notes, language] = await Promise.all([
-      env.DB.prepare("SELECT app_id FROM favorites WHERE user_id=?").bind(userId).all(),
-      env.DB.prepare("SELECT d.app_id,a.title,d.created_at FROM downloads d JOIN apps a ON a.id=d.app_id WHERE d.user_id=? ORDER BY d.created_at DESC LIMIT 100").bind(userId).all(),
-      env.DB.prepare("SELECT id,title,message,created_at FROM notifications WHERE active=1 ORDER BY created_at DESC LIMIT 30").all(),
+      env.DB.prepare("SELECT app_id FROM appnest_favorites WHERE user_id=?").bind(userId).all(),
+      env.DB.prepare("SELECT d.app_id,a.title,d.created_at FROM appnest_downloads d JOIN appnest_apps a ON a.id=d.app_id WHERE d.user_id=? ORDER BY d.created_at DESC LIMIT 100").bind(userId).all(),
+      env.DB.prepare("SELECT id,title,message,created_at FROM appnest_notifications WHERE active=1 ORDER BY created_at DESC LIMIT 30").all(),
       env.DB.prepare("SELECT language FROM users WHERE telegram_id=?").bind(userId).first()
     ]);
-    return json({ success:true, user:session.user, language:language?.language || "ru", is_admin:session.isAdmin, favorites:(favs.results||[]).map(x=>String(x.app_id)), history:history.results||[], notifications:notes.results||[] });
+    return json({ success:true, user:session.user, language:language?.language || "ru", is_admin:session.isAdmin, appnest_favorites:(favs.results||[]).map(x=>String(x.app_id)), history:history.results||[], appnest_notifications:notes.results||[] });
   }
   if (path === "/me" && method === "PATCH") {
     const b=await readJson(request); if(!["ru","tj","en"].includes(b.language)) return fail("Unsupported language");
     await env.DB.prepare("UPDATE users SET language=? WHERE telegram_id=?").bind(b.language,userId).run();
     return json({success:true,language:b.language});
   }
-  if (path.startsWith("/favorites/")) {
+  if (path.startsWith("/appnest_favorites/")) {
     const appId = Number(path.split("/")[2]);
     if (!Number.isSafeInteger(appId) || appId < 1) return fail("Некорректное приложение");
     if (method === "POST") {
-      await env.DB.prepare("INSERT OR IGNORE INTO favorites(user_id,app_id) SELECT ?,id FROM apps WHERE id=? AND status='published'").bind(userId,appId).run();
+      await env.DB.prepare("INSERT OR IGNORE INTO appnest_favorites(user_id,app_id) SELECT ?,id FROM appnest_apps WHERE id=? AND status='published'").bind(userId,appId).run();
       return json({ success:true });
     }
-    if (method === "DELETE") { await env.DB.prepare("DELETE FROM favorites WHERE user_id=? AND app_id=?").bind(userId,appId).run(); return json({success:true}); }
+    if (method === "DELETE") { await env.DB.prepare("DELETE FROM appnest_favorites WHERE user_id=? AND app_id=?").bind(userId,appId).run(); return json({success:true}); }
   }
-  if (path.startsWith("/apps/") && path.endsWith("/versions") && method === "GET") {
+  if (path.startsWith("/appnest_apps/") && path.endsWith("/versions") && method === "GET") {
     const id=Number(path.split("/")[2]);
     if(!Number.isSafeInteger(id)||id<1) return fail("Некорректное приложение");
-    const {results=[]}=await env.DB.prepare("SELECT v.version,v.version_code,v.min_android,v.size_bytes,v.release_notes,v.created_at FROM app_versions v JOIN apps a ON a.id=v.app_id WHERE v.app_id=? AND a.status='published' ORDER BY v.version_code DESC LIMIT 30").bind(id).all();
+    const {results=[]}=await env.DB.prepare("SELECT v.version,v.version_code,v.min_android,v.size_bytes,v.release_notes,v.created_at FROM appnest_app_versions v JOIN appnest_apps a ON a.id=v.app_id WHERE v.app_id=? AND a.status='published' ORDER BY v.version_code DESC LIMIT 30").bind(id).all();
     return json({success:true,versions:results});
   }
-  if (path.startsWith("/apps/") && path.endsWith("/download-ticket") && method === "POST") {
+  if (path.startsWith("/appnest_apps/") && path.endsWith("/download-ticket") && method === "POST") {
     const appId=Number(path.split("/")[2]);
-    const app=await env.DB.prepare("SELECT id,apk_key FROM apps WHERE id=? AND status='published' AND apk_key IS NOT NULL").bind(appId).first();
+    const app=await env.DB.prepare("SELECT id,apk_key FROM appnest_apps WHERE id=? AND status='published' AND apk_key IS NOT NULL").bind(appId).first();
     if(!app) return fail("Приложение не найдено",404);
     const subs=await subscriptionCheck(env,userId);
     if(!subs.allowed) return json({success:false,error:subs.unavailable?"Не удалось проверить подписки. Повторите попытку позже.":"Для скачивания необходимо подписаться на каналы",subscription_required:true,mode:subs.unavailable?"unavailable":"required",channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed}))},403);
     const bytes=crypto.getRandomValues(new Uint8Array(32)),token=hex(bytes),hash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(token))),expiry=Math.floor(Date.now()/1000)+60;
-    await env.DB.prepare("INSERT INTO download_tokens(token_hash,user_id,app_id,expires_at) VALUES(?,?,?,?)").bind(hash,userId,appId,expiry).run();
+    await env.DB.prepare("INSERT INTO appnest_download_tokens(token_hash,user_id,app_id,expires_at) VALUES(?,?,?,?)").bind(hash,userId,appId,expiry).run();
     return json({success:true,url:"/api/download/"+token,expires_at:expiry});
   }
-  if (path.startsWith("/apps/") && path.endsWith("/download") && method === "POST") {
+  if (path.startsWith("/appnest_apps/") && path.endsWith("/download") && method === "POST") {
     const appId = Number(path.split("/")[2]);
-    const app = await env.DB.prepare("SELECT id,apk_key,apk_sha256,title FROM apps WHERE id=? AND status='published'").bind(appId).first();
+    const app = await env.DB.prepare("SELECT id,apk_key,apk_sha256,title FROM appnest_apps WHERE id=? AND status='published'").bind(appId).first();
     if (!app || !app.apk_key) return fail("Приложение не найдено",404);
     const subs = await subscriptionCheck(env,userId);
     if (!subs.allowed) return json({ success:false, error:subs.unavailable ? "Не удалось проверить подписки. Повторите попытку позже." : "Для скачивания необходимо подписаться на каналы", subscription_required:true, mode:subs.unavailable ? "unavailable" : "required", channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed})) },403);
@@ -245,30 +245,30 @@ async function handle(request, env) {
     await logDownload(env,userId,appId);
     return new Response(object.body,{headers:{"content-type":"application/vnd.android.package-archive","content-disposition":`attachment; filename="${app.id}.apk"`,"content-length":String(object.size),"x-content-type-options":"nosniff","cache-control":"private, no-store","etag":object.httpEtag || ""}});
   }
-  if (path === "/feedback" && method === "POST") {
+  if (path === "/appnest_feedback" && method === "POST") {
     const body = await readJson(request); const message = clean(body.message,2000);
     if (message.length < 3) return fail("Сообщение слишком короткое");
-    await env.DB.prepare("INSERT INTO feedback(user_id,message) VALUES (?,?)").bind(userId,message).run();
+    await env.DB.prepare("INSERT INTO appnest_feedback(user_id,message) VALUES (?,?)").bind(userId,message).run();
     return json({success:true},201);
   }
   if (path === "/ads" && method === "GET") {
-    const {results=[]}=await env.DB.prepare("SELECT id,title,kind,creative_url,target_url FROM ad_campaigns WHERE active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now') ORDER BY priority DESC LIMIT 10").all();
+    const {results=[]}=await env.DB.prepare("SELECT id,title,kind,creative_url,target_url FROM appnest_ad_campaigns WHERE active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now') ORDER BY priority DESC LIMIT 10").all();
     const safeAds=results.filter(ad=>validHttpUrl(ad.target_url)&&(!ad.creative_url||validHttpUrl(ad.creative_url))).slice(0,5);
     const today=new Date().toISOString().slice(0,10),shown=[];
-    for(const ad of safeAds){const cap=await env.DB.prepare("SELECT impressions FROM ad_frequency WHERE user_id=? AND ad_id=? AND day=?").bind(userId,ad.id,today).first();if((cap?.impressions||0)<3)shown.push(ad);}
+    for(const ad of safeAds){const cap=await env.DB.prepare("SELECT impressions FROM appnest_ad_frequency WHERE user_id=? AND ad_id=? AND day=?").bind(userId,ad.id,today).first();if((cap?.impressions||0)<3)shown.push(ad);}
     return json({success:true,ads:shown});
   }
   if (path.startsWith("/ads/") && method === "POST" && /\/(impression|click)$/.test(path)) {
     const bits=path.split("/"),id=Number(bits[2]),action=bits[3],today=new Date().toISOString().slice(0,10);
-    const ad=await env.DB.prepare("SELECT id FROM ad_campaigns WHERE id=? AND active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now')").bind(id).first();
+    const ad=await env.DB.prepare("SELECT id FROM appnest_ad_campaigns WHERE id=? AND active=1 AND starts_at<=datetime('now') AND ends_at>=datetime('now')").bind(id).first();
     if(!ad) return fail("Реклама не найдена",404);
     if(action==="impression"){
-      const changed=await env.DB.prepare("INSERT INTO ad_frequency(user_id,ad_id,day,impressions) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET impressions=impressions+1 WHERE impressions<3").bind(userId,id,today).run();
+      const changed=await env.DB.prepare("INSERT INTO appnest_ad_frequency(user_id,ad_id,day,impressions) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET impressions=impressions+1 WHERE impressions<3").bind(userId,id,today).run();
       if(!changed.meta?.changes) return json({success:true,limited:true});
-      await env.DB.prepare("UPDATE ad_campaigns SET impressions=impressions+1 WHERE id=?").bind(id).run();
+      await env.DB.prepare("UPDATE appnest_ad_campaigns SET impressions=impressions+1 WHERE id=?").bind(id).run();
     }else{
-      await env.DB.prepare("INSERT INTO ad_frequency(user_id,ad_id,day,clicks) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET clicks=clicks+1").bind(userId,id,today).run();
-      await env.DB.prepare("UPDATE ad_campaigns SET clicks=clicks+1 WHERE id=?").bind(id).run();
+      await env.DB.prepare("INSERT INTO appnest_ad_frequency(user_id,ad_id,day,clicks) VALUES(?,?,?,1) ON CONFLICT(user_id,ad_id,day) DO UPDATE SET clicks=clicks+1").bind(userId,id,today).run();
+      await env.DB.prepare("UPDATE appnest_ad_campaigns SET clicks=clicks+1 WHERE id=?").bind(id).run();
     }
     return json({success:true});
   }
@@ -277,29 +277,29 @@ async function handle(request, env) {
     if(!session.isAdmin) return fail("Недостаточно прав",403);
     const admin = session;
 
-    if (path === "/admin/categories" && method === "GET") {
-      const {results=[]}=await env.DB.prepare("SELECT id,slug,title,icon,sort_order FROM categories ORDER BY sort_order,title").all();
-      return json({success:true,categories:results});
+    if (path === "/admin/appnest_categories" && method === "GET") {
+      const {results=[]}=await env.DB.prepare("SELECT id,slug,title,icon,sort_order FROM appnest_categories ORDER BY sort_order,title").all();
+      return json({success:true,appnest_categories:results});
     }
-    if (path === "/admin/categories" && method === "POST") {
+    if (path === "/admin/appnest_categories" && method === "POST") {
       const b=await readJson(request), slug=clean(b.slug,60).toLowerCase().replace(/[^a-z0-9_-]/g,"-"),title=clean(b.title,100),icon=clean(b.icon,20);
       if(!slug||!title) return fail("Укажите slug и название категории");
-      await env.DB.prepare("INSERT INTO categories(slug,title,icon,sort_order) VALUES(?,?,?,?)").bind(slug,title,icon,Number(b.sort_order)||0).run();
+      await env.DB.prepare("INSERT INTO appnest_categories(slug,title,icon,sort_order) VALUES(?,?,?,?)").bind(slug,title,icon,Number(b.sort_order)||0).run();
       await audit(env,userId,"category.create",slug); return json({success:true},201);
     }
-    if (path.startsWith("/admin/categories/") && method === "PATCH") {
+    if (path.startsWith("/admin/appnest_categories/") && method === "PATCH") {
       const id=Number(path.split("/")[3]), b=await readJson(request);
       if(!Number.isSafeInteger(id)||id<1) return fail("Некорректная категория");
       const title=clean(b.title,100),icon=clean(b.icon,20),order=Number(b.sort_order);
       if(!title) return fail("Укажите название");
-      await env.DB.prepare("UPDATE categories SET title=?,icon=?,sort_order=? WHERE id=?").bind(title,icon,Number.isFinite(order)?order:0,id).run();
+      await env.DB.prepare("UPDATE appnest_categories SET title=?,icon=?,sort_order=? WHERE id=?").bind(title,icon,Number.isFinite(order)?order:0,id).run();
       await audit(env,userId,"category.update",String(id)); return json({success:true});
     }
-    if (path.startsWith("/admin/categories/") && method === "DELETE") {
+    if (path.startsWith("/admin/appnest_categories/") && method === "DELETE") {
       const id=Number(path.split("/")[3]);
-      const used=await env.DB.prepare("SELECT COUNT(*) n FROM apps WHERE category=(SELECT slug FROM categories WHERE id=?)").bind(id).first();
+      const used=await env.DB.prepare("SELECT COUNT(*) n FROM appnest_apps WHERE category=(SELECT slug FROM appnest_categories WHERE id=?)").bind(id).first();
       if(used?.n) return fail("Категория используется приложениями",409);
-      await env.DB.prepare("DELETE FROM categories WHERE id=?").bind(id).run(); await audit(env,userId,"category.delete",String(id)); return json({success:true});
+      await env.DB.prepare("DELETE FROM appnest_categories WHERE id=?").bind(id).run(); await audit(env,userId,"category.delete",String(id)); return json({success:true});
     }
     if (path === "/admin/uploads" && method === "POST") {
       if(!env.FILES) return fail("R2 binding FILES не настроен",503);
@@ -315,13 +315,13 @@ async function handle(request, env) {
       if(isImage && size>10*1024*1024) return fail("Изображение превышает 10 МБ",413);
       if(appId && (!Number.isSafeInteger(appId)||appId<1)) return fail("Некорректный app_id");
       if(appId){
-        const app=await env.DB.prepare("SELECT id,version_code FROM apps WHERE id=?").bind(appId).first();
+        const app=await env.DB.prepare("SELECT id,version_code FROM appnest_apps WHERE id=?").bind(appId).first();
         if(!app) return fail("Приложение не найдено",404);
         if(isApk&&meta.version_code<=Number(app.version_code||0)) return fail("version_code должен быть больше текущей версии",409);
       }
       const key=(isApk?"apk/":"media/")+crypto.randomUUID()+(isApk?".apk":mime==="image/png"?".png":mime==="image/webp"?".webp":".jpg");
       const mp=await createMultipart(env,key,meta.content_type),id=crypto.randomUUID(),expiry=Math.floor(Date.now()/1000)+86400;
-      await env.DB.prepare("INSERT INTO upload_sessions(id,owner_id,app_id,object_key,r2_upload_id,metadata_json,expected_size,client_sha256,expires_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(id,userId,appId,key,mp.uploadId,JSON.stringify(meta),size,clean(b.sha256,64).toLowerCase(),expiry).run();
+      await env.DB.prepare("INSERT INTO appnest_upload_sessions(id,owner_id,app_id,object_key,r2_upload_id,metadata_json,expected_size,client_sha256,expires_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(id,userId,appId,key,mp.uploadId,JSON.stringify(meta),size,clean(b.sha256,64).toLowerCase(),expiry).run();
       return json({success:true,upload_id:id,object_key:key,part_size:8388608,expires_at:expiry},201);
     }
     if (path.startsWith("/admin/uploads/") && path.endsWith("/parts") && method === "PUT") {
@@ -335,11 +335,11 @@ async function handle(request, env) {
       const length=Number(request.headers.get("content-length")||0);
       const expectedLength=part===expectedParts?session.expected_size-partSize*(expectedParts-1):partSize;
       if(!length||length!==expectedLength) return fail("Размер части не совпадает с ожидаемым размером R2 multipart",413);
-      const current=await env.DB.prepare("SELECT COALESCE(SUM(size_bytes),0) n FROM upload_parts WHERE upload_id=? AND part_number<>?").bind(id,part).first();
+      const current=await env.DB.prepare("SELECT COALESCE(SUM(size_bytes),0) n FROM appnest_upload_parts WHERE upload_id=? AND part_number<>?").bind(id,part).first();
       if((current?.n||0)+length>session.expected_size) return fail("Части превышают заявленный размер",413);
       const upload=env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id);
       const result=await upload.uploadPart(part,request.body);
-      await env.DB.prepare("INSERT INTO upload_parts(upload_id,part_number,etag,size_bytes) VALUES(?,?,?,?) ON CONFLICT(upload_id,part_number) DO UPDATE SET etag=excluded.etag,size_bytes=excluded.size_bytes").bind(id,part,result.etag,length).run();
+      await env.DB.prepare("INSERT INTO appnest_upload_parts(upload_id,part_number,etag,size_bytes) VALUES(?,?,?,?) ON CONFLICT(upload_id,part_number) DO UPDATE SET etag=excluded.etag,size_bytes=excluded.size_bytes").bind(id,part,result.etag,length).run();
       return json({success:true,part_number:part,etag:result.etag,size_bytes:length});
     }
     if (path.startsWith("/admin/uploads/") && path.endsWith("/complete") && method === "POST") {
@@ -347,11 +347,11 @@ async function handle(request, env) {
       const id=path.split("/")[3];
       const session=await uploadOwner(env,id,userId);
       if(!session){
-        const completed=await env.DB.prepare("SELECT app_id,object_key,metadata_json FROM upload_sessions WHERE id=? AND owner_id=? AND status='completed'").bind(id,userId).first();
+        const completed=await env.DB.prepare("SELECT app_id,object_key,metadata_json FROM appnest_upload_sessions WHERE id=? AND owner_id=? AND status='completed'").bind(id,userId).first();
         if(completed){
           const meta=safeJson(completed.metadata_json);
           const app=meta.kind==="apk"&&completed.app_id
-            ? await env.DB.prepare("SELECT apk_sha256 FROM apps WHERE id=?").bind(completed.app_id).first()
+            ? await env.DB.prepare("SELECT apk_sha256 FROM appnest_apps WHERE id=?").bind(completed.app_id).first()
             : null;
           return json({success:true,app_id:completed.app_id,object_key:completed.object_key,sha256:app?.apk_sha256||null});
         }
@@ -364,10 +364,10 @@ async function handle(request, env) {
       }
       if(meta.kind!=="apk"&&!session.app_id) return fail("Для медиафайла нужен app_id");
       if(session.app_id){
-        const existing=await env.DB.prepare("SELECT id FROM apps WHERE id=?").bind(session.app_id).first();
+        const existing=await env.DB.prepare("SELECT id FROM appnest_apps WHERE id=?").bind(session.app_id).first();
         if(!existing) return fail("Приложение не найдено",404);
       }
-      const {results:parts=[]}=await env.DB.prepare("SELECT part_number,etag,size_bytes FROM upload_parts WHERE upload_id=? ORDER BY part_number").bind(id).all();
+      const {results:parts=[]}=await env.DB.prepare("SELECT part_number,etag,size_bytes FROM appnest_upload_parts WHERE upload_id=? ORDER BY part_number").bind(id).all();
       const total=parts.reduce((n,p)=>n+p.size_bytes,0);
       if(!parts.length||total!==session.expected_size||parts.some((p,i)=>p.part_number!==i+1)) return fail("Не все части загружены или размер не совпадает",409);
       let stored=await env.FILES.get(session.object_key);
@@ -376,34 +376,34 @@ async function handle(request, env) {
         await upload.complete(parts.map(p=>({partNumber:p.part_number,etag:p.etag})));
         stored=await env.FILES.get(session.object_key);
       }
-      if(!stored||stored.size!==session.expected_size){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Размер готового объекта не совпадает с заявленным",422);}
+      if(!stored||stored.size!==session.expected_size){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE appnest_upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Размер готового объекта не совпадает с заявленным",422);}
       let verifiedApkSha=null;
       if(meta.kind==="apk"){
         const signatureObject=await env.FILES.get(session.object_key,{range:{offset:0,length:4}});
         const sig=new Uint8Array(await signatureObject.arrayBuffer());
-        if(sig.length<4||sig[0]!==0x50||sig[1]!==0x4b||sig[2]!==0x03||sig[3]!==0x04){ await env.FILES.delete(session.object_key); await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run(); return fail("Файл не имеет ZIP-сигнатуру"); }
+        if(sig.length<4||sig[0]!==0x50||sig[1]!==0x4b||sig[2]!==0x03||sig[3]!==0x04){ await env.FILES.delete(session.object_key); await env.DB.prepare("UPDATE appnest_upload_sessions SET status='failed' WHERE id=?").bind(id).run(); return fail("Файл не имеет ZIP-сигнатуру"); }
         const suppliedSha=clean(session.client_sha256,64);
-        if(suppliedSha && !/^[a-f0-9]{64}$/.test(suppliedSha)){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Некорректный SHA-256");}
+        if(suppliedSha && !/^[a-f0-9]{64}$/.test(suppliedSha)){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE appnest_upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Некорректный SHA-256");}
         const actualSha=await sha256Readable(stored.body);
-        if(suppliedSha && actualSha!==suppliedSha){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("SHA-256 не совпадает: файл повреждён или изменён",422);}
+        if(suppliedSha && actualSha!==suppliedSha){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE appnest_upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("SHA-256 не совпадает: файл повреждён или изменён",422);}
         const sha=actualSha; verifiedApkSha=sha;
         if(session.app_id){
-          const app=await env.DB.prepare("SELECT id,apk_key FROM apps WHERE id=?").bind(session.app_id).first();
-          const known=await env.DB.prepare("SELECT id FROM app_versions WHERE app_id=? AND apk_key=?").bind(session.app_id,session.object_key).first();
-          if(!known) await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
-          await env.DB.prepare("UPDATE apps SET version=?,version_code=?,min_android=?,size_bytes=?,apk_key=?,apk_sha256=?,updated_at=datetime('now') WHERE id=?").bind(meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,session.app_id).run();
+          const app=await env.DB.prepare("SELECT id,apk_key FROM appnest_apps WHERE id=?").bind(session.app_id).first();
+          const known=await env.DB.prepare("SELECT id FROM appnest_app_versions WHERE app_id=? AND apk_key=?").bind(session.app_id,session.object_key).first();
+          if(!known) await env.DB.prepare("INSERT INTO appnest_app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
+          await env.DB.prepare("UPDATE appnest_apps SET version=?,version_code=?,min_android=?,size_bytes=?,apk_key=?,apk_sha256=?,updated_at=datetime('now') WHERE id=?").bind(meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,session.app_id).run();
         } else {
           const data=meta.metadata||{},title=clean(data.title,100),description=clean(data.description,5000),developer=clean(data.developer,120),category=clean(data.category,80);
           if(!title||!description||!category){ await env.FILES.delete(session.object_key); return fail("Для нового приложения нужны title, description и category"); }
-          const existingApp=await env.DB.prepare("SELECT id FROM apps WHERE apk_key=?").bind(session.object_key).first();
+          const existingApp=await env.DB.prepare("SELECT id FROM appnest_apps WHERE apk_key=?").bind(session.object_key).first();
           if(existingApp) session.app_id=existingApp.id;
           else {
-            const ins=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,version_code,min_android,size_bytes,apk_key,apk_sha256,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,"draft",userId).run();
+            const ins=await env.DB.prepare("INSERT INTO appnest_apps(title,description,developer,category,version,version_code,min_android,size_bytes,apk_key,apk_sha256,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,"draft",userId).run();
             session.app_id=ins.meta.last_row_id;
           }
-          await env.DB.prepare("UPDATE upload_sessions SET app_id=? WHERE id=?").bind(session.app_id,id).run();
-          const known=await env.DB.prepare("SELECT id FROM app_versions WHERE app_id=? AND apk_key=?").bind(session.app_id,session.object_key).first();
-          if(!known) await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
+          await env.DB.prepare("UPDATE appnest_upload_sessions SET app_id=? WHERE id=?").bind(session.app_id,id).run();
+          const known=await env.DB.prepare("SELECT id FROM appnest_app_versions WHERE app_id=? AND apk_key=?").bind(session.app_id,session.object_key).first();
+          if(!known) await env.DB.prepare("INSERT INTO appnest_app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(session.app_id,meta.version,meta.version_code,meta.min_android,total,session.object_key,sha,meta.release_notes).run();
         }
       } else {
         const sampleObject=await env.FILES.get(session.object_key,{range:{offset:0,length:12}});
@@ -412,67 +412,67 @@ async function handle(request, env) {
         const isJpeg=sample[0]===255&&sample[1]===216&&sample[2]===255;
         const isWebp=sample.length>=12&&String.fromCharCode(...sample.slice(0,4))==="RIFF"&&String.fromCharCode(...sample.slice(8,12))==="WEBP";
         const mimeMatches=(meta.content_type==="image/png"&&isPng)||(meta.content_type==="image/jpeg"&&isJpeg)||(meta.content_type==="image/webp"&&isWebp);
-        if(!mimeMatches){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Содержимое файла не соответствует заявленному MIME-типу");}
+        if(!mimeMatches){await env.FILES.delete(session.object_key);await env.DB.prepare("UPDATE appnest_upload_sessions SET status='failed' WHERE id=?").bind(id).run();return fail("Содержимое файла не соответствует заявленному MIME-типу");}
         const column=meta.kind==="icon"?"icon_key":meta.kind==="banner"?"banner_key":null;
-        if(column) await env.DB.prepare("UPDATE apps SET "+column+"=?,updated_at=datetime('now') WHERE id=?").bind(session.object_key,session.app_id).run();
+        if(column) await env.DB.prepare("UPDATE appnest_apps SET "+column+"=?,updated_at=datetime('now') WHERE id=?").bind(session.object_key,session.app_id).run();
         else {
-          const row=await env.DB.prepare("SELECT screenshots_json FROM apps WHERE id=?").bind(session.app_id).first();
+          const row=await env.DB.prepare("SELECT screenshots_json FROM appnest_apps WHERE id=?").bind(session.app_id).first();
           const list=safeArray(row?.screenshots_json); if(!list.includes(session.object_key)) list.push(session.object_key);
-          await env.DB.prepare("UPDATE apps SET screenshots_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify(list.slice(-10)),session.app_id).run();
+          await env.DB.prepare("UPDATE appnest_apps SET screenshots_json=?,updated_at=datetime('now') WHERE id=?").bind(JSON.stringify(list.slice(-10)),session.app_id).run();
         }
       }
-      await env.DB.prepare("UPDATE upload_sessions SET status='completed' WHERE id=?").bind(id).run();
+      await env.DB.prepare("UPDATE appnest_upload_sessions SET status='completed' WHERE id=?").bind(id).run();
       try{await audit(env,userId,"upload.complete",id,meta.kind);}catch(error){console.warn("Upload audit event was not saved:",error?.message||"audit failed");}
       return json({success:true,app_id:session.app_id,object_key:session.object_key,sha256:verifiedApkSha});
     }
     if (path.startsWith("/admin/uploads/") && method === "DELETE") {
-      const id=path.split("/")[3],session=await env.DB.prepare("SELECT * FROM upload_sessions WHERE id=? AND owner_id=? AND status='open'").bind(id,userId).first();
+      const id=path.split("/")[3],session=await env.DB.prepare("SELECT * FROM appnest_upload_sessions WHERE id=? AND owner_id=? AND status='open'").bind(id,userId).first();
       if(!session) return fail("Загрузка не найдена",404);
       try{await env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id).abort();}catch(error){console.warn("R2 multipart abort:",error?.message||"failed");}
-      await env.DB.prepare("UPDATE upload_sessions SET status='aborted' WHERE id=? AND owner_id=? AND status='open'").bind(id,userId).run();
+      await env.DB.prepare("UPDATE appnest_upload_sessions SET status='aborted' WHERE id=? AND owner_id=? AND status='open'").bind(id,userId).run();
       return json({success:true});
     }
-    if (path.startsWith("/admin/apps/") && path.endsWith("/versions") && method === "GET") {
+    if (path.startsWith("/admin/appnest_apps/") && path.endsWith("/versions") && method === "GET") {
       const id=Number(path.split("/")[3]);
-      const {results=[]}=await env.DB.prepare("SELECT id,version,version_code,min_android,size_bytes,sha256,release_notes,created_at FROM app_versions WHERE app_id=? ORDER BY version_code DESC").bind(id).all();
+      const {results=[]}=await env.DB.prepare("SELECT id,version,version_code,min_android,size_bytes,sha256,release_notes,created_at FROM appnest_app_versions WHERE app_id=? ORDER BY version_code DESC").bind(id).all();
       return json({success:true,versions:results});
     }
     if (path.startsWith("/admin/channels/") && method === "PATCH") {
       const id=Number(path.split("/")[3]),b=await readJson(request);
       if(typeof b.enabled!=="boolean") return fail("enabled должен быть boolean");
-      await env.DB.prepare("UPDATE required_channels SET enabled=? WHERE id=?").bind(b.enabled?1:0,id).run(); await audit(env,userId,"channel.toggle",String(id)); return json({success:true});
+      await env.DB.prepare("UPDATE appnest_required_channels SET enabled=? WHERE id=?").bind(b.enabled?1:0,id).run(); await audit(env,userId,"channel.toggle",String(id)); return json({success:true});
     }
     if (path.startsWith("/admin/channels/") && method === "DELETE") {
-      const id=Number(path.split("/")[3]); await env.DB.prepare("DELETE FROM required_channels WHERE id=?").bind(id).run(); await audit(env,userId,"channel.delete",String(id)); return json({success:true});
+      const id=Number(path.split("/")[3]); await env.DB.prepare("DELETE FROM appnest_required_channels WHERE id=?").bind(id).run(); await audit(env,userId,"channel.delete",String(id)); return json({success:true});
     }
     if (path.startsWith("/admin/ads/") && method === "PATCH") {
       const id=Number(path.split("/")[3]),b=await readJson(request);
       if(!Number.isSafeInteger(id)||id<1) return fail("Некорректная кампания");
       if(Object.keys(b).length===1&&typeof b.active==="boolean"){
-        await env.DB.prepare("UPDATE ad_campaigns SET active=? WHERE id=?").bind(b.active?1:0,id).run();
+        await env.DB.prepare("UPDATE appnest_ad_campaigns SET active=? WHERE id=?").bind(b.active?1:0,id).run();
         await audit(env,userId,"ad.toggle",String(id)); return json({success:true});
       }
       const title=clean(b.title,120),kind=clean(b.kind,40),creative=clean(b.creative_url,1000),target=clean(b.target_url,1000),starts=clean(b.starts_at,40),ends=clean(b.ends_at,40);
       if(!title||!["banner","channel","task"].includes(kind)||!validHttpUrl(target)||(creative&&!validHttpUrl(creative))||!starts||!ends||!Number.isFinite(Date.parse(starts))||!Number.isFinite(Date.parse(ends))||new Date(starts)>=new Date(ends)) return fail("Некорректные параметры кампании");
-      await env.DB.prepare("UPDATE ad_campaigns SET title=?,kind=?,creative_url=?,target_url=?,starts_at=?,ends_at=?,priority=? WHERE id=?").bind(title,kind,creative,target,starts,ends,Number(b.priority)||0,id).run();
+      await env.DB.prepare("UPDATE appnest_ad_campaigns SET title=?,kind=?,creative_url=?,target_url=?,starts_at=?,ends_at=?,priority=? WHERE id=?").bind(title,kind,creative,target,starts,ends,Number(b.priority)||0,id).run();
       await audit(env,userId,"ad.update",String(id)); return json({success:true});
     }
     if (path.startsWith("/admin/ads/") && method === "DELETE") {
-      const id=Number(path.split("/")[3]); await env.DB.prepare("DELETE FROM ad_campaigns WHERE id=?").bind(id).run(); await audit(env,userId,"ad.delete",String(id)); return json({success:true});
+      const id=Number(path.split("/")[3]); await env.DB.prepare("DELETE FROM appnest_ad_campaigns WHERE id=?").bind(id).run(); await audit(env,userId,"ad.delete",String(id)); return json({success:true});
     }
-    if (path === "/admin/notifications" && method === "GET") {
-      const {results=[]}=await env.DB.prepare("SELECT id,title,message,active,created_at FROM notifications ORDER BY created_at DESC LIMIT 100").all();
-      return json({success:true,notifications:results});
+    if (path === "/admin/appnest_notifications" && method === "GET") {
+      const {results=[]}=await env.DB.prepare("SELECT id,title,message,active,created_at FROM appnest_notifications ORDER BY created_at DESC LIMIT 100").all();
+      return json({success:true,appnest_notifications:results});
     }
-    if (path.startsWith("/admin/notifications/") && method === "PATCH") {
+    if (path.startsWith("/admin/appnest_notifications/") && method === "PATCH") {
       const id=Number(path.split("/")[3]),b=await readJson(request);
       if(typeof b.active!=="boolean") return fail("active должен быть boolean");
-      await env.DB.prepare("UPDATE notifications SET active=? WHERE id=?").bind(b.active?1:0,id).run(); await audit(env,userId,"notification.toggle",String(id)); return json({success:true});
+      await env.DB.prepare("UPDATE appnest_notifications SET active=? WHERE id=?").bind(b.active?1:0,id).run(); await audit(env,userId,"notification.toggle",String(id)); return json({success:true});
     }
-    if (path.startsWith("/admin/feedback/") && method === "PATCH") {
+    if (path.startsWith("/admin/appnest_feedback/") && method === "PATCH") {
       const id=Number(path.split("/")[3]),b=await readJson(request);
       if(!["open","resolved","rejected"].includes(b.status)) return fail("Недопустимый статус");
-      await env.DB.prepare("UPDATE feedback SET status=? WHERE id=?").bind(b.status,id).run(); await audit(env,userId,"feedback.update",String(id)); return json({success:true});
+      await env.DB.prepare("UPDATE appnest_feedback SET status=? WHERE id=?").bind(b.status,id).run(); await audit(env,userId,"appnest_feedback.update",String(id)); return json({success:true});
     }
 
     if (path === "/admin/users" && method === "GET") {
@@ -480,20 +480,20 @@ async function handle(request, env) {
       return json({success:true,users:results});
     }
     if (path === "/admin/overview" && method === "GET") {
-      const [apps,users,downloads,feedback,allApps,ads,channels,frequency,mode] = await Promise.all([
-        env.DB.prepare("SELECT COUNT(*) n FROM apps WHERE status='published'").first(),
+      const [appnest_apps,users,appnest_downloads,appnest_feedback,allApps,ads,channels,frequency,mode] = await Promise.all([
+        env.DB.prepare("SELECT COUNT(*) n FROM appnest_apps WHERE status='published'").first(),
         env.DB.prepare("SELECT COUNT(*) n FROM users").first(),
-        env.DB.prepare("SELECT COUNT(*) n FROM downloads").first(),
-        env.DB.prepare("SELECT id,user_id,message,created_at FROM feedback WHERE status='open' ORDER BY created_at DESC LIMIT 50").all(),
-        env.DB.prepare("SELECT id,title,description,category,version,downloads,status FROM apps ORDER BY created_at DESC LIMIT 100").all(),
-        env.DB.prepare("SELECT id,title,kind,creative_url,target_url,active,starts_at,ends_at,priority,impressions,clicks FROM ad_campaigns ORDER BY id DESC LIMIT 50").all(),
-        env.DB.prepare("SELECT id,chat_id,title,invite_url,enabled FROM required_channels ORDER BY id").all(),
-        env.DB.prepare("SELECT substr(created_at,1,10) day,COUNT(*) count FROM downloads GROUP BY substr(created_at,1,10) ORDER BY day DESC LIMIT 14").all(),
-        env.DB.prepare("SELECT value FROM settings WHERE key='subscription_mode'").first()
+        env.DB.prepare("SELECT COUNT(*) n FROM appnest_downloads").first(),
+        env.DB.prepare("SELECT id,user_id,message,created_at FROM appnest_feedback WHERE status='open' ORDER BY created_at DESC LIMIT 50").all(),
+        env.DB.prepare("SELECT id,title,description,category,version,appnest_downloads,status FROM appnest_apps ORDER BY created_at DESC LIMIT 100").all(),
+        env.DB.prepare("SELECT id,title,kind,creative_url,target_url,active,starts_at,ends_at,priority,impressions,clicks FROM appnest_ad_campaigns ORDER BY id DESC LIMIT 50").all(),
+        env.DB.prepare("SELECT id,chat_id,title,invite_url,enabled FROM appnest_required_channels ORDER BY id").all(),
+        env.DB.prepare("SELECT substr(created_at,1,10) day,COUNT(*) count FROM appnest_downloads GROUP BY substr(created_at,1,10) ORDER BY day DESC LIMIT 14").all(),
+        env.DB.prepare("SELECT value FROM appnest_settings WHERE key='subscription_mode'").first()
       ]);
-      return json({success:true,apps_count:apps.n,users_count:users.n,downloads_count:downloads.n,feedback:feedback.results,apps:allApps.results,ads:ads.results,channels:channels.results,downloads_by_day:frequency.results,subscription_mode:mode?.value||"all"});
+      return json({success:true,apps_count:appnest_apps.n,users_count:users.n,downloads_count:appnest_downloads.n,appnest_feedback:appnest_feedback.results,appnest_apps:allApps.results,ads:ads.results,channels:channels.results,downloads_by_day:frequency.results,subscription_mode:mode?.value||"all"});
     }
-    if (path === "/admin/apps" && method === "POST") {
+    if (path === "/admin/appnest_apps" && method === "POST") {
       const form=await request.formData(); const title=clean(form.get("title"),100), description=clean(form.get("description"),5000), developer=clean(form.get("developer"),120), category=clean(form.get("category"),80), version=clean(form.get("version"),40), minAndroid=clean(form.get("min_android"),40);
       const apk=form.get("apk"), icon=form.get("icon");
       if(!title || !description || !category || !(apk instanceof File) || apk.size<8 || !apk.name.toLowerCase().endsWith(".apk")) return fail("Укажите название, описание, категорию и корректный APK");
@@ -514,51 +514,51 @@ async function handle(request, env) {
       }
       let createdAppId=null;
       try {
-        const inserted=await env.DB.prepare("INSERT INTO apps(title,description,developer,category,version,min_android,size_bytes,apk_key,apk_sha256,icon_key,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,version,minAndroid,apk.size,key,digest,iconKey,"published",userId).run();
+        const inserted=await env.DB.prepare("INSERT INTO appnest_apps(title,description,developer,category,version,min_android,size_bytes,apk_key,apk_sha256,icon_key,status,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").bind(title,description,developer,category,version,minAndroid,apk.size,key,digest,iconKey,"published",userId).run();
         createdAppId=inserted.meta.last_row_id;
-        await env.DB.prepare("INSERT INTO app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(createdAppId,version,0,minAndroid,apk.size,key,digest,"").run();
+        await env.DB.prepare("INSERT INTO appnest_app_versions(app_id,version,version_code,min_android,size_bytes,apk_key,sha256,release_notes) VALUES(?,?,?,?,?,?,?,?)").bind(createdAppId,version,0,minAndroid,apk.size,key,digest,"").run();
       } catch(error) {
-        if(createdAppId) await env.DB.prepare("DELETE FROM apps WHERE id=?").bind(createdAppId).run();
+        if(createdAppId) await env.DB.prepare("DELETE FROM appnest_apps WHERE id=?").bind(createdAppId).run();
         await env.FILES.delete(key); if(iconKey) await env.FILES.delete(iconKey); throw error;
       }
       try{await audit(env,userId,"app.create",String(createdAppId),`sha256=${digest}`);}catch(error){console.warn("App audit event was not saved:",error?.message||"audit failed");}
       return json({success:true,id:createdAppId,sha256:digest,size_bytes:apk.size},201);
     }
-    if (path.startsWith("/admin/apps/") && method === "PATCH") {
+    if (path.startsWith("/admin/appnest_apps/") && method === "PATCH") {
       const id=Number(path.split("/")[3]); const body=await readJson(request);
       const fields={title:"title",description:"description",developer:"developer",category:"category",version:"version",min_android:"min_android",status:"status"};
       const sets=[],values=[];
       for(const [key,col] of Object.entries(fields)) if(body[key]!==undefined){ const value=clean(body[key],key==="description"?5000:200); if(key==="status"&&!["draft","published","archived"].includes(value)) return fail("Недопустимый статус"); sets.push(col+"=?"); values.push(value); }
       if(!sets.length) return fail("Нет изменений");
-      values.push(id); await env.DB.prepare("UPDATE apps SET "+sets.join(",")+",updated_at=datetime('now') WHERE id=?").bind(...values).run(); await audit(env,userId,"app.update",String(id)); return json({success:true});
+      values.push(id); await env.DB.prepare("UPDATE appnest_apps SET "+sets.join(",")+",updated_at=datetime('now') WHERE id=?").bind(...values).run(); await audit(env,userId,"app.update",String(id)); return json({success:true});
     }
     if (path === "/admin/channels" && method === "POST") {
       const b=await readJson(request); const chatId=clean(String(b.chat_id||""),120),title=clean(b.title,120),invite=clean(b.invite_url,500);
       if(!chatId||!title||!/^https:\/\/(t\.me|telegram\.me)\//.test(invite)) return fail("Проверьте chat_id, название и ссылку канала");
-      await env.DB.prepare("INSERT INTO required_channels(chat_id,title,invite_url,enabled) VALUES(?,?,?,1)").bind(chatId,title,invite).run(); await audit(env,userId,"channel.create",chatId); return json({success:true},201);
+      await env.DB.prepare("INSERT INTO appnest_required_channels(chat_id,title,invite_url,enabled) VALUES(?,?,?,1)").bind(chatId,title,invite).run(); await audit(env,userId,"channel.create",chatId); return json({success:true},201);
     }
     if (path === "/admin/subscription-mode" && method === "PUT") {
       const b=await readJson(request); if(!["all","any"].includes(b.mode)) return fail("Режим должен быть all или any");
-      await env.DB.prepare("INSERT INTO settings(key,value) VALUES('subscription_mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(b.mode).run(); await audit(env,userId,"subscription.mode",b.mode); return json({success:true});
+      await env.DB.prepare("INSERT INTO appnest_settings(key,value) VALUES('subscription_mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(b.mode).run(); await audit(env,userId,"subscription.mode",b.mode); return json({success:true});
     }
     if (path === "/admin/ads" && method === "POST") {
       const b=await readJson(request); const title=clean(b.title,120),kind=clean(b.kind,40),creative=clean(b.creative_url,1000),target=clean(b.target_url,1000),starts=clean(b.starts_at,40),ends=clean(b.ends_at,40);
       if(!title||!["banner","channel","task"].includes(kind)||!validHttpUrl(target)||(creative&&!validHttpUrl(creative))||!starts||!ends||!Number.isFinite(Date.parse(starts))||!Number.isFinite(Date.parse(ends))||new Date(starts)>=new Date(ends)) return fail("Некорректные параметры кампании");
-      await env.DB.prepare("INSERT INTO ad_campaigns(title,kind,creative_url,target_url,starts_at,ends_at,active,priority) VALUES(?,?,?,?,?,?,?,?)").bind(title,kind,creative,target,starts,ends,b.active===false?0:1,Number(b.priority)||0).run(); await audit(env,userId,"ad.create",title); return json({success:true},201);
+      await env.DB.prepare("INSERT INTO appnest_ad_campaigns(title,kind,creative_url,target_url,starts_at,ends_at,active,priority) VALUES(?,?,?,?,?,?,?,?)").bind(title,kind,creative,target,starts,ends,b.active===false?0:1,Number(b.priority)||0).run(); await audit(env,userId,"ad.create",title); return json({success:true},201);
     }
     if (path.startsWith("/admin/users/") && method === "PATCH") {
       const id=path.split("/")[3]; const b=await readJson(request); if(!/^\d+$/.test(id)||typeof b.blocked!=="boolean") return fail("Некорректные данные");
       await env.DB.prepare("UPDATE users SET is_blocked=? WHERE telegram_id=?").bind(b.blocked?1:0,id).run(); await audit(env,userId,b.blocked?"user.block":"user.unblock",id); return json({success:true});
     }
-    if (path === "/admin/notifications" && method === "POST") {
+    if (path === "/admin/appnest_notifications" && method === "POST") {
       const b=await readJson(request); const title=clean(b.title,120),message=clean(b.message,2000); if(!title||!message) return fail("Заполните заголовок и сообщение");
-      await env.DB.prepare("INSERT INTO notifications(title,message,active) VALUES(?,?,1)").bind(title,message).run(); await audit(env,userId,"notification.create",title); return json({success:true},201);
+      await env.DB.prepare("INSERT INTO appnest_notifications(title,message,active) VALUES(?,?,1)").bind(title,message).run(); await audit(env,userId,"notification.create",title); return json({success:true},201);
     }
-    if (path === "/admin/feedback" && method === "GET") {
-      const {results=[]}=await env.DB.prepare("SELECT * FROM feedback ORDER BY created_at DESC LIMIT 200").all(); return json({success:true,feedback:results});
+    if (path === "/admin/appnest_feedback" && method === "GET") {
+      const {results=[]}=await env.DB.prepare("SELECT * FROM appnest_feedback ORDER BY created_at DESC LIMIT 200").all(); return json({success:true,appnest_feedback:results});
     }
     if (path === "/admin/audit" && method === "GET") {
-      const {results=[]}=await env.DB.prepare("SELECT actor_id,action,target,details,created_at FROM admin_audit ORDER BY id DESC LIMIT 200").all(); return json({success:true,events:results});
+      const {results=[]}=await env.DB.prepare("SELECT actor_id,action,target,details,created_at FROM appnest_admin_audit ORDER BY id DESC LIMIT 200").all(); return json({success:true,events:results});
     }
     return fail("Endpoint not found",404);
   }
@@ -567,19 +567,19 @@ async function handle(request, env) {
 async function cleanupExpired(env) {
   if(!env.DB) return;
   const now=Math.floor(Date.now()/1000);
-  const {results=[]}=await env.DB.prepare("SELECT id,object_key,r2_upload_id FROM upload_sessions WHERE status='open' AND expires_at<=? LIMIT 100").bind(now).all();
+  const {results=[]}=await env.DB.prepare("SELECT id,object_key,r2_upload_id FROM appnest_upload_sessions WHERE status='open' AND expires_at<=? LIMIT 100").bind(now).all();
   for(const session of results){
     if(env.FILES){
       try{await env.FILES.resumeMultipartUpload(session.object_key,session.r2_upload_id).abort();}
       catch(error){console.warn("Expired multipart cleanup:",error?.message||"abort failed");}
     }
-    await env.DB.prepare("UPDATE upload_sessions SET status='failed' WHERE id=? AND status='open'").bind(session.id).run();
+    await env.DB.prepare("UPDATE appnest_upload_sessions SET status='failed' WHERE id=? AND status='open'").bind(session.id).run();
   }
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM download_tokens WHERE expires_at<? OR used_at IS NOT NULL").bind(now),
-    env.DB.prepare("DELETE FROM rate_limits WHERE expires_at<?").bind(now),
-    env.DB.prepare("DELETE FROM ad_frequency WHERE day<date('now','-90 days')"),
-    env.DB.prepare("DELETE FROM upload_sessions WHERE status IN ('completed','aborted','failed') AND created_at<datetime('now','-30 days')")
+    env.DB.prepare("DELETE FROM appnest_download_tokens WHERE expires_at<? OR used_at IS NOT NULL").bind(now),
+    env.DB.prepare("DELETE FROM appnest_rate_limits WHERE expires_at<?").bind(now),
+    env.DB.prepare("DELETE FROM appnest_ad_frequency WHERE day<date('now','-90 days')"),
+    env.DB.prepare("DELETE FROM appnest_upload_sessions WHERE status IN ('completed','aborted','failed') AND created_at<datetime('now','-30 days')")
   ]);
 }
 function safeArray(value) { try { const x=JSON.parse(value||"[]"); return Array.isArray(x)?x:[]; } catch { return []; } }

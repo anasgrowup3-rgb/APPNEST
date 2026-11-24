@@ -10,9 +10,9 @@ class MockDB {
       bind: (...args) => ({
         first: async () => {
           if (sql.includes("SELECT is_blocked")) return { is_blocked: 0 };
-          if (sql.includes("SELECT count FROM rate_limits")) return { count: 1 };
+          if (sql.includes("SELECT count FROM appnest_rate_limits")) return { count: 1 };
           if (sql.includes("SELECT language FROM users")) return { language: "ru" };
-          if (sql.includes("FROM apps WHERE id=? AND status='published'")) return { id: 1, apk_key: "apk/test.apk" };
+          if (sql.includes("FROM appnest_apps WHERE id=? AND status='published'")) return { id: 1, apk_key: "apk/test.apk" };
           if (sql.includes("COUNT(*)")) return { n: 0 };
           return null;
         },
@@ -143,8 +143,8 @@ test("R2 multipart rejects a part whose size is not the required 8 MiB", async (
         bind(...args){return{
           first:async()=>{
             if(sql.includes("SELECT is_blocked"))return{is_blocked:0};
-            if(sql.includes("SELECT count FROM rate_limits"))return{count:1};
-            if(sql.includes("SELECT * FROM upload_sessions"))return{id:"upload-1",owner_id:"42",object_key:"apk/test.apk",r2_upload_id:"r2-id",expected_size:8388609,expires_at:Math.floor(Date.now()/1000)+600};
+            if(sql.includes("SELECT count FROM appnest_rate_limits"))return{count:1};
+            if(sql.includes("SELECT * FROM appnest_upload_sessions"))return{id:"upload-1",owner_id:"42",object_key:"apk/test.apk",r2_upload_id:"r2-id",expected_size:8388609,expires_at:Math.floor(Date.now()/1000)+600};
             if(sql.includes("COALESCE(SUM(size_bytes)"))return{n:0};
             return null;
           },
@@ -190,16 +190,16 @@ test("Telegram membership API outage fails closed even in any-channel mode", asy
         bind(...args){return{
           first:async()=>{
             if(sql.includes("SELECT is_blocked"))return{is_blocked:0};
-            if(sql.includes("SELECT count FROM rate_limits"))return{count:1};
-            if(sql.includes("FROM apps WHERE id=? AND status='published'"))return{id:1,apk_key:"apk/test.apk"};
+            if(sql.includes("SELECT count FROM appnest_rate_limits"))return{count:1};
+            if(sql.includes("FROM appnest_apps WHERE id=? AND status='published'"))return{id:1,apk_key:"apk/test.apk"};
             if(sql.includes("settings WHERE key='subscription_mode'"))return{value:"any"};
             return null;
           },
-          all:async()=>({results:sql.includes("FROM required_channels")?[{chat_id:"@required",title:"Required",invite_url:"https://t.me/required"}]:[]}),
+          all:async()=>({results:sql.includes("FROM appnest_required_channels")?[{chat_id:"@required",title:"Required",invite_url:"https://t.me/required"}]:[]}),
           run:async()=>({meta:{changes:1}})
         };},
         first:async()=>null,
-        all:async()=>({results:sql.includes("FROM required_channels")?[{chat_id:"@required",title:"Required",invite_url:"https://t.me/required"}]:[]}),
+        all:async()=>({results:sql.includes("FROM appnest_required_channels")?[{chat_id:"@required",title:"Required",invite_url:"https://t.me/required"}]:[]}),
         run:async()=>({meta:{changes:1}})
       };},
     }
@@ -219,7 +219,7 @@ test("scheduled cleanup aborts expired R2 multipart sessions and batches retenti
     DB:{
       prepare(sql){return{
         bind(){return{
-          all:async()=>({results:sql.includes("FROM upload_sessions WHERE status='open'")?[{id:"expired-1",object_key:"apk/expired.apk",r2_upload_id:"r2-expired"}]:[]}),
+          all:async()=>({results:sql.includes("FROM appnest_upload_sessions WHERE status='open'")?[{id:"expired-1",object_key:"apk/expired.apk",r2_upload_id:"r2-expired"}]:[]}),
           run:async()=>({meta:{changes:1}})
         };},
         all:async()=>({results:[]}),run:async()=>({meta:{changes:1}})
@@ -296,24 +296,24 @@ test("multipart image upload streams a part, completes, and attaches media using
           return {
             first: async () => {
               if (sql.includes("SELECT is_blocked")) return {is_blocked:0};
-              if (sql.includes("SELECT count FROM rate_limits")) return {count:1};
-              if (sql.includes("SELECT * FROM upload_sessions")) return session;
-              if (sql.includes("SELECT id FROM apps") || sql.includes("SELECT id,version_code FROM apps")) return {id:5,version_code:1};
+              if (sql.includes("SELECT count FROM appnest_rate_limits")) return {count:1};
+              if (sql.includes("SELECT * FROM appnest_upload_sessions")) return session;
+              if (sql.includes("SELECT id FROM appnest_apps") || sql.includes("SELECT id,version_code FROM appnest_apps")) return {id:5,version_code:1};
               if (sql.includes("SELECT screenshots_json")) return {screenshots_json:"[]"};
               if (sql.includes("COALESCE(SUM(size_bytes)")) return {n:0};
               return null;
             },
             all: async () => {
-              if (sql.includes("SELECT part_number,etag,size_bytes FROM upload_parts")) return {results:partRows};
+              if (sql.includes("SELECT part_number,etag,size_bytes FROM appnest_upload_parts")) return {results:partRows};
               return {results:[]};
             },
             run: async () => {
-              if (sql.includes("INSERT INTO upload_sessions")) {
+              if (sql.includes("INSERT INTO appnest_upload_sessions")) {
                 session={id:args[0],owner_id:args[1],app_id:args[2],object_key:args[3],r2_upload_id:args[4],metadata_json:args[5],expected_size:args[6],client_sha256:args[7],expires_at:args[8],status:"open"};
               }
-              if (sql.includes("INSERT INTO upload_parts")) partRows=[{part_number:args[1],etag:args[2],size_bytes:args[3]}];
-              if (sql.includes("UPDATE apps SET icon_key")) attached=true;
-              if (sql.includes("UPDATE upload_sessions SET status='completed'")) session.status="completed";
+              if (sql.includes("INSERT INTO appnest_upload_parts")) partRows=[{part_number:args[1],etag:args[2],size_bytes:args[3]}];
+              if (sql.includes("UPDATE appnest_apps SET icon_key")) attached=true;
+              if (sql.includes("UPDATE appnest_upload_sessions SET status='completed'")) session.status="completed";
               return {meta:{changes:1,last_row_id:5}};
             }
           };
@@ -366,7 +366,7 @@ test("multipart upload cannot be accessed by a different Telegram owner", async 
     ...env(),
     DB:{
       prepare(sql){return{bind(){return{
-        first:async()=>sql.includes("SELECT is_blocked")?{is_blocked:0}:sql.includes("SELECT count FROM rate_limits")?{count:1}:sql.includes("SELECT * FROM upload_sessions")?null:null,
+        first:async()=>sql.includes("SELECT is_blocked")?{is_blocked:0}:sql.includes("SELECT count FROM appnest_rate_limits")?{count:1}:sql.includes("SELECT * FROM appnest_upload_sessions")?null:null,
         all:async()=>({results:[]}),run:async()=>({meta:{changes:1}})
       };},first:async()=>null,all:async()=>({results:[]}),run:async()=>({meta:{changes:1}})};}
     }
@@ -392,12 +392,12 @@ test("Telegram getChatMember mock enforces all and any subscription modes", asyn
       DB:{
         prepare(sql){return{
           bind(){return{
-            first:async()=>sql.includes("SELECT is_blocked")?{is_blocked:0}:sql.includes("SELECT count FROM rate_limits")?{count:1}:sql.includes("SELECT value FROM settings")?{value:mode}:null,
-            all:async()=>({results:sql.includes("FROM required_channels")?channels:[]}),
+            first:async()=>sql.includes("SELECT is_blocked")?{is_blocked:0}:sql.includes("SELECT count FROM appnest_rate_limits")?{count:1}:sql.includes("SELECT value FROM appnest_settings")?{value:mode}:null,
+            all:async()=>({results:sql.includes("FROM appnest_required_channels")?channels:[]}),
             run:async()=>({meta:{changes:1}})
           };},
-          first:async()=>sql.includes("SELECT value FROM settings")?{value:mode}:null,
-          all:async()=>({results:sql.includes("FROM required_channels")?channels:[]}),
+          first:async()=>sql.includes("SELECT value FROM appnest_settings")?{value:mode}:null,
+          all:async()=>({results:sql.includes("FROM appnest_required_channels")?channels:[]}),
           run:async()=>({meta:{changes:1}})
         };}
       }

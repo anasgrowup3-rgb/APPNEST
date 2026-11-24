@@ -192,7 +192,9 @@ async function audit(env, actor, action, target, details = "") {
 }
 async function subscriptionCheck(env, userId) {
   const { results = [] } = await env.DB.prepare("SELECT chat_id, title, invite_url FROM appnest_required_channels WHERE enabled=1").all();
-  if (!results.length || env.TELEGRAM_SUBSCRIPTIONS_ENABLED !== "true") return { allowed: true, channels: [] };
+  const enabledSetting=await env.DB.prepare("SELECT value FROM appnest_settings WHERE key='subscriptions_enabled'").first();
+  const subscriptionsEnabled=enabledSetting ? enabledSetting.value==="true" : env.TELEGRAM_SUBSCRIPTIONS_ENABLED==="true";
+  if (!results.length || !subscriptionsEnabled) return { allowed: true, channels: [] };
   if (!/^\d+$/.test(String(userId)) || !Number.isSafeInteger(Number(userId))) {
     return { allowed: false, unavailable: false, telegram_required: true, channels: results };
   }
@@ -397,6 +399,16 @@ async function handle(request, env) {
     if(!session.isAdmin) return fail("Недостаточно прав",403);
     const admin = session;
 
+    if(path==="/admin/subscriptions-enabled"&&method==="GET"){
+      const row=await env.DB.prepare("SELECT value FROM appnest_settings WHERE key='subscriptions_enabled'").first();
+      return json({success:true,enabled:row?row.value==="true":env.TELEGRAM_SUBSCRIPTIONS_ENABLED==="true"});
+    }
+    if(path==="/admin/subscriptions-enabled"&&method==="PUT"){
+      const b=await readJson(request);if(typeof b.enabled!=="boolean")return fail("Укажите enabled: true или false");
+      await env.DB.prepare("INSERT INTO appnest_settings(key,value) VALUES('subscriptions_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(b.enabled?"true":"false").run();
+      await audit(env,userId,"subscription.enabled",b.enabled?"true":"false");
+      return json({success:true,enabled:b.enabled});
+    }
     if(path==="/admin/recovery-codes"&&method==="POST"){
       const codes=Array.from({length:8},()=>hex(crypto.getRandomValues(new Uint8Array(16))));
       await env.DB.prepare("DELETE FROM appnest_admin_recovery_codes WHERE user_id=?").bind(userId).run();

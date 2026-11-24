@@ -3,7 +3,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [feat/appnest-stable-api]
+    branches: [feat/appnest-stable-api, feature/standalone-accounts]
 jobs:
   test:
     runs-on: ubuntu-latest

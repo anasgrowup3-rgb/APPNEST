@@ -578,14 +578,14 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
       let extra=$("#adminExtras");if(!extra){extra=document.createElement("section");extra.id="adminExtras";extra.className="admin-extras";$("#page-admin").append(extra);}
       extra.innerHTML=`
         <div class="admin-tabs admin-extra-tabs">
-          <button data-extra-tab="categories">Категории</button><button data-extra-tab="channels">Каналы</button><button data-extra-tab="ads">Реклама</button><button data-extra-tab="users">Пользователи</button><button data-extra-tab="notifications">Уведомления</button><button data-extra-tab="audit">Журнал действий</button>
+          <button data-extra-tab="categories">Категории</button><button data-extra-tab="channels">Каналы</button><button data-extra-tab="ads">Реклама</button><button data-extra-tab="users">Пользователи</button><button data-extra-tab="notifications">Уведомления</button><button data-extra-tab="audit">Журнал действий</button><button data-extra-tab="telegram">Telegram</button>
         </div>
         <section data-extra-panel="categories"><h3>Категории</h3><form id="categoryForm"><input name="slug" placeholder="slug" required><input name="title" placeholder="Название" required><input name="icon" placeholder="Иконка"><button>Добавить</button></form><div>${(categories.categories||[]).map(c=>`<p>${escapeHTML(c.title)} (${escapeHTML(c.slug)}) <button data-category-edit="${c.id}" data-title="${escapeHTML(c.title)}" data-icon="${escapeHTML(c.icon||"")}">Изменить</button><button data-category-delete="${c.id}">Удалить</button></p>`).join("")}</div></section>
         <section data-extra-panel="channels" hidden><h3>Обязательные каналы</h3><form id="channelForm"><input name="chat_id" placeholder="@channel или -100…" required><input name="title" placeholder="Название" required><input name="invite_url" placeholder="https://t.me/..." required><button>Добавить канал</button></form><label>Условие подписки<select id="subscriptionMode"><option value="all">На все каналы</option><option value="any">На любой канал</option></select></label><div>${(data.channels||[]).map(c=>`<p>${escapeHTML(c.title)} · ${c.enabled?"включён":"выключен"} <button data-channel-toggle="${c.id}" data-enabled="${c.enabled?0:1}">${c.enabled?"Отключить":"Включить"}</button><button data-channel-delete="${c.id}">Удалить</button></p>`).join("")}</div></section>
         <section data-extra-panel="ads" hidden><h3>Рекламная кампания</h3><form id="adForm"><input name="title" placeholder="Название кампании" required><select name="kind"><option value="banner">Баннер</option><option value="channel">Telegram-канал</option><option value="task">Задание</option></select><input name="creative_url" placeholder="URL изображения (необязательно)"><input name="target_url" placeholder="HTTPS ссылка" required><label>Начало<input name="starts_at" type="datetime-local" required></label><label>Окончание<input name="ends_at" type="datetime-local" required></label><button>Создать кампанию</button></form><p>Частота: не более 3 показов одного объявления пользователю в день.</p></section>
         <section data-extra-panel="users" hidden><h3>Пользователи</h3><div>${(users.users||[]).map(u=>`<p>${escapeHTML(u.first_name)} @${escapeHTML(u.username||"")} · ${escapeHTML(u.telegram_id)} · ${u.is_blocked?"заблокирован":"активен"} <button data-user-block="${escapeHTML(u.telegram_id)}" data-blocked="${u.is_blocked?0:1}">${u.is_blocked?"Разблокировать":"Заблокировать"}</button></p>`).join("")}</div></section>
         <section data-extra-panel="notifications" hidden><h3>Новое уведомление</h3><form id="notificationForm"><input name="title" placeholder="Заголовок" required><textarea name="message" placeholder="Сообщение" required></textarea><button>Опубликовать</button></form><h3>Опубликованные уведомления</h3>${(notifications.notifications||[]).map(n=>`<p>${escapeHTML(n.title)} · ${n.active?"активно":"скрыто"} <button data-notification-toggle="${n.id}" data-active="${n.active?0:1}">${n.active?"Скрыть":"Показать"}</button></p>`).join("")}</section>
-        <section data-extra-panel="audit" hidden><h3>Последние действия администратора</h3>${auditRows}</section>`;
+        <section data-extra-panel="audit" hidden><h3>Последние действия администратора</h3>${auditRows}</section><section data-extra-panel="telegram" hidden><h3>Подключение Telegram</h3><p>Установить кнопку запуска APPNEST в меню бота.</p><button class="primary-button" id="telegramMenuButton" type="button">Установить кнопку «Открыть APPNEST»</button></section>`;
       const modeSelect=$("#subscriptionMode");if(modeSelect)modeSelect.value=data.subscription_mode||"all";
       $("#adminAppsList").querySelectorAll(".admin-actions button").forEach(b=>b.classList.add("secondary-button"));
     } catch(error){toast("Не удалось загрузить панель: "+error.message);}
@@ -860,6 +860,15 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
       return;
     }
 
+    const telegramMenuButton=event.target.closest("#telegramMenuButton");
+    if(telegramMenuButton){
+      telegramMenuButton.disabled=true;
+      telegramMenuButton.textContent="Подключаем...";
+      request("/admin/telegram/menu-button",{method:"POST",body:JSON.stringify({})})
+        .then(()=>{telegramMenuButton.textContent="Кнопка подключена";toast("Кнопка Telegram настроена");})
+        .catch(error=>{telegramMenuButton.disabled=false;telegramMenuButton.textContent="Повторить подключение";toast(error.message||"Не удалось подключить Telegram");});
+      return;
+    }
     const extraTab=event.target.closest("[data-extra-tab]");
     if(extraTab){$("#adminExtras").querySelectorAll("[data-extra-panel]").forEach(p=>p.hidden=p.dataset.extraPanel!==extraTab.dataset.extraTab);return;}
     const statusButton=event.target.closest("[data-app-status]");

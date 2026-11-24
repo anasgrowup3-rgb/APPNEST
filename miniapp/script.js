@@ -1126,6 +1126,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
     if(form.id==="updateApkForm"){event.preventDefault();const d=new FormData(form),file=d.get("apk"),button=form.querySelector("button");button.disabled=true;const status=$("#uploadStatus");status.hidden=false;uploadFileMultipart(file,"apk",{app_id:Number(form.dataset.appId),version:d.get("version"),version_code:Number(d.get("version_code")),min_android:d.get("min_android"),release_notes:d.get("release_notes")},setUploadProgress).then(()=>{closeModal();toast("Обновление загружено");loadAdmin();loadApps();}).catch(e=>{status.textContent="Ошибка: "+e.message+" · Нажмите повторить";button.disabled=false;button.textContent="Повторить загрузку";toast(e.message);});}
     if(form.id==="categoryForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/categories",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
     if(form.id==="channelForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/channels",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
+    if(form.id==="channelVerifyForm"){event.preventDefault();const button=form.querySelector("button"),result=$("#channelVerifyResult");button.disabled=true;result.textContent="Проверяем права бота…";request("/admin/diagnostics/channel",{method:"POST",body:JSON.stringify({chat_id:new FormData(form).get("chat_id")})}).then(data=>{result.textContent="Канал подключён: "+data.channel.title+" · ID "+data.channel.id+". Обязательная подписка выключена.";toast("Бот подтверждён как администратор");loadAdmin();}).catch(e=>{result.textContent=e.message;toast(e.message);}).finally(()=>{button.disabled=false;});}
     if(form.id==="editAdForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));d.starts_at=new Date(d.starts_at).toISOString().replace("T"," ").slice(0,19);d.ends_at=new Date(d.ends_at).toISOString().replace("T"," ").slice(0,19);d.priority=Number(d.priority)||0;request("/admin/ads/"+form.dataset.adId,{method:"PATCH",body:JSON.stringify(d)}).then(()=>{closeModal();loadAdmin();}).catch(e=>toast(e.message));}
     if(form.id==="adForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));d.starts_at=new Date(d.starts_at).toISOString().replace("T"," ").slice(0,19);d.ends_at=new Date(d.ends_at).toISOString().replace("T"," ").slice(0,19);request("/admin/ads",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
     if(form.id==="notificationForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/notifications",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
@@ -1153,6 +1154,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
 
     renderProfile();
     applyTranslations();
+    if(new URLSearchParams(window.location.search).get("admin")==="1"&&state.isAdmin){navigate("admin");window.history.replaceState({}, "", window.location.pathname);}
   }
 
   start();

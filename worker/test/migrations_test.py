@@ -7,7 +7,12 @@ EXPECTED_TABLES = {
     "users", "categories", "apps", "app_versions", "favorites", "downloads",
     "feedback", "notifications", "required_channels", "settings", "ad_campaigns",
     "admin_audit", "rate_limits", "upload_sessions", "upload_parts",
-    "ad_frequency", "download_tokens",
+    "ad_frequency", "download_tokens", "appnest_categories", "appnest_apps",
+    "appnest_app_versions", "appnest_favorites", "appnest_downloads",
+    "appnest_feedback", "appnest_notifications", "appnest_required_channels",
+    "appnest_settings", "appnest_ad_campaigns", "appnest_admin_audit",
+    "appnest_rate_limits", "appnest_upload_sessions", "appnest_upload_parts",
+    "appnest_ad_frequency", "appnest_download_tokens",
 }
 
 class MigrationSmokeTest(unittest.TestCase):
@@ -46,6 +51,12 @@ class MigrationSmokeTest(unittest.TestCase):
             "idx_upload_sessions_expiry", "idx_ad_frequency_day",
             "idx_download_tokens_expiry"
         } <= indexes)
+
+    def test_worker_compatibility_tables_and_default_categories(self):
+        self.apply_all()
+        categories = {row[0] for row in self.db.execute("SELECT slug FROM appnest_categories")}
+        self.assertTrue({"productivity", "games", "tools", "other"} <= categories)
+        self.assertEqual(self.db.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     def test_user_app_version_and_upload_relationships(self):
         self.apply_all()

@@ -43,6 +43,7 @@
     return new Promise((resolve,reject)=>{
       const xhr=new XMLHttpRequest();
       xhr.open("PUT",API+`/admin/uploads/${encodeURIComponent(uploadId)}/parts?part_number=${partNumber}`);
+      xhr.withCredentials=true;
       xhr.setRequestHeader("X-Telegram-Init-Data",initData);
       xhr.setRequestHeader("Content-Type","application/octet-stream");
       xhr.upload.onprogress=e=>{if(e.lengthComputable) onProgress(e.loaded,e.total);};
@@ -118,6 +119,7 @@
   }
   async function request(path, options = {}) {
     const response = await fetch(API + path, {
+      credentials: "include",
       ...options,
       headers: {
         "Content-Type": "application/json",
@@ -554,7 +556,7 @@
 
     $("#profileName") && ($("#profileName").textContent = name);
     $("#profileUsername") && ($("#profileUsername").textContent =
-      user.username ? "@" + user.username : (user.email || "APPNEST account"));
+      user.username ? "@" + user.username : (user.email || (String(user.id||"").startsWith("guest_") ? "Гостевой аккаунт" : "APPNEST account")));
 
     const letter = name.charAt(0).toUpperCase();
     $("#headerAvatarLetter") && ($("#headerAvatarLetter").textContent = letter);

@@ -461,3 +461,58 @@ test("Telegram getChatMember mock enforces all and any subscription modes", asyn
     globalThis.fetch=originalFetch;
   }
 });
+
+test("POST /auth/admin-telegram without initData is a 401 auth error, never 404", async () => {
+  const response = await call("/auth/admin-telegram", { method: "POST", body: {} });
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).success, false);
+});
+test("POST /auth/admin-telegram creates a session for the configured admin and reports is_admin", async () => {
+  const response = await call("/auth/admin-telegram", { method: "POST", body: {}, initData: signedInitData(42) });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("set-cookie") || "", /appnest_session=[a-f0-9]{64}; Path=\/api; .*HttpOnly; Secure/);
+  assert.equal((await response.json()).is_admin, true);
+});
+test("POST /auth/admin-telegram refuses a valid Telegram user who is not an admin", async () => {
+  const response = await call("/auth/admin-telegram", { method: "POST", body: {}, initData: signedInitData(7) });
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get("set-cookie"), null);
+});
+test("ADMIN_IDS tolerates spaces and the numeric Telegram id is compared as a string", async () => {
+  const environment = { ...env(), ADMIN_IDS: " 7 , 8335750192 " };
+  const response = await call("/me", { initData: signedInitData(8335750192), environment });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).is_admin, true);
+  const other = await call("/me", { initData: signedInitData(83357501), environment });
+  assert.equal((await other.json()).is_admin, false);
+});
+test("API path is tolerated with or without a duplicated /api prefix", async () => {
+  for (const prefix of ["/api", "/api/api", ""]) {
+    const response = await worker.fetch(new Request("https://api.example" + prefix + "/auth/admin-telegram", { method: "POST", body: "{}", headers: { "content-type": "application/json" } }), env());
+    assert.equal(response.status, 401, prefix);
+  }
+  const health = await worker.fetch(new Request("https://api.example/api/api/health"), env());
+  assert.equal(health.status, 200);
+});
+test("verified admin initData takes precedence over an existing non-admin cookie session", async () => {
+  const base = env();
+  const guestDb = {
+    prepare(sql) {
+      const inner = base.DB.prepare(sql);
+      return { ...inner, bind: (...args) => ({ ...inner.bind(...args),
+        first: async () => {
+          if (sql.includes("FROM appnest_auth_sessions")) return { user_id: "guest_1", expires_at: Math.floor(Date.now()/1000) + 1000 };
+          if (sql.includes("FROM users u LEFT JOIN appnest_credentials")) return { telegram_id: args[0], username: "", first_name: "Гость", last_name: "", photo_url: "", email: "" };
+          return inner.bind(...args).first();
+        } }) };
+    }
+  };
+  const environment = { ...base, DB: guestDb };
+  const cookie = { cookie: "appnest_session=" + "a".repeat(64) };
+  const guest = await call("/me", { headers: cookie, environment });
+  assert.equal((await guest.json()).is_admin, false);
+  const admin = await call("/me", { headers: cookie, initData: signedInitData(42), environment });
+  assert.equal((await admin.json()).is_admin, true);
+  const impostor = await call("/me", { headers: cookie, initData: signedInitData(7), environment });
+  assert.equal((await impostor.json()).is_admin, false);
+});

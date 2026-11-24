@@ -604,6 +604,31 @@
       about.append(access);
     }
     if(about && !$("#logoutButton")){const out=document.createElement("button");out.id="logoutButton";out.type="button";out.textContent="Выйти из аккаунта";about.append(out);}
+    if(about && initData && !state.isAdmin && !$("#profileTelegramAdminButton")){
+      const adminButton=document.createElement("button");
+      adminButton.id="profileTelegramAdminButton";
+      adminButton.type="button";
+      adminButton.textContent="Войти администратором через Telegram";
+      adminButton.style.cssText="display:block;width:100%;margin-top:12px;border:1px solid rgba(169,156,255,.5);border-radius:12px;padding:13px;background:rgba(149,101,255,.12);color:#c8bcff;font-weight:700";
+      adminButton.addEventListener("click",async()=>{
+        adminButton.disabled=true;
+        const oldText=adminButton.textContent;
+        adminButton.textContent="Проверяем администратора…";
+        try{
+          await request("/auth/admin-telegram",{method:"POST",body:JSON.stringify({})});
+          await loadProfileData();
+          if(!state.isAdmin) throw new Error("Сервер не подтвердил права администратора");
+          navigate("admin");
+          toast("Вход администратора выполнен");
+        }catch(error){
+          adminButton.disabled=false;
+          adminButton.textContent=oldText;
+          toast(error.message||"Не удалось войти администратором");
+        }
+      });
+      about.append(adminButton);
+    }
+    if(state.isAdmin) $("#profileTelegramAdminButton")?.remove();
   }
 
   async function loadProfileData() {

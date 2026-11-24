@@ -13,7 +13,7 @@ EXPECTED_TABLES = {
     "appnest_settings", "appnest_ad_campaigns", "appnest_admin_audit",
     "appnest_rate_limits", "appnest_upload_sessions", "appnest_upload_parts",
     "appnest_ad_frequency", "appnest_download_tokens", "appnest_credentials",
-    "appnest_auth_sessions", "appnest_admins",
+    "appnest_auth_sessions", "appnest_admins", "appnest_admin_recovery_codes",
 }
 
 class MigrationSmokeTest(unittest.TestCase):
@@ -35,6 +35,7 @@ class MigrationSmokeTest(unittest.TestCase):
         self.db.executescript((ROOT / "0002_uploads_ads.sql").read_text(encoding="utf-8"))
         self.db.executescript((ROOT / "0003_production_compat.sql").read_text(encoding="utf-8"))
         self.db.executescript((ROOT / "0004_standalone_accounts.sql").read_text(encoding="utf-8"))
+        self.db.executescript((ROOT / "0005_admin_recovery_codes.sql").read_text(encoding="utf-8"))
         row = self.db.execute(
             "SELECT telegram_id, first_name, language FROM users WHERE telegram_id='123'"
         ).fetchone()

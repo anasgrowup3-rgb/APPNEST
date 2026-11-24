@@ -60,6 +60,12 @@ test("guest access creates a server session without email or Telegram", async ()
   assert.equal(data.guest, true);
   assert.equal(data.is_admin, false);
 });
+test("cross-origin state-changing requests are rejected", async () => {
+  const denied=await call("/auth/guest",{method:"POST",body:{},headers:{Origin:"https://attacker.example"}});
+  assert.equal(denied.status,403);
+  const allowed=await call("/auth/guest",{method:"POST",body:{},headers:{Origin:"https://appnest-web.anas-grow-up-3.workers.dev"}});
+  assert.equal(allowed.status,201);
+});
 test("canonical APPNEST web origin is allowed for credentialed sessions", async () => {
   const response = await call("/health", { method: "OPTIONS", headers: { Origin: "https://appnest-web.anas-grow-up-3.workers.dev" } });
   assert.equal(response.status, 204);
@@ -78,6 +84,14 @@ test("user routes reject missing or forged Telegram initData", async () => {
   assert.equal((await call("/me")).status, 401);
   assert.equal((await call("/me", { initData: "user=%7B%7D&hash=bad" })).status, 401);
 });
+test("new admin security routes reject unauthenticated and non-admin callers", async () => {
+  for (const [method,path] of [["GET","/admin/diagnostics"],["POST","/admin/diagnostics/channel"],["POST","/admin/recovery-codes"],["DELETE","/admin/recovery-codes"]]) {
+    const options=method==="GET"?{method}:{method,body:{}};
+    assert.equal((await call(path,options)).status,401);
+    assert.equal((await call(path,{...options,initData:signedInitData(7)})).status,403);
+  }
+});
+
 test("admin routes reject missing session and non-admin users", async () => {
   assert.equal((await call("/admin/overview")).status, 401);
   assert.equal((await call("/admin/overview", { initData: signedInitData(7) })).status, 403);

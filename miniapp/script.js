@@ -173,7 +173,7 @@
         <div id="authNameWrap" hidden><label for="authName">Имя</label><input id="authName" name="name" maxlength="80" autocomplete="name" placeholder="Как тебя называть"></div>
         <label for="authEmail">Электронная почта</label><input id="authEmail" name="email" type="email" maxlength="254" required autocomplete="email" placeholder="name@example.com">
         <label for="authPassword">Пароль</label><input id="authPassword" name="password" type="password" minlength="10" maxlength="128" required autocomplete="current-password" placeholder="Минимум 10 символов">
-        <button class="auth-submit" type="submit" id="authSubmit">Войти в APPNEST</button><button type="button" id="authGuest" class="auth-guest" style="width:100%;margin-top:10px;border:1px solid #3a3a4a;border-radius:12px;padding:13px;background:#191a26;color:#eee;font-weight:700">Продолжить как гость</button>
+        <button class="auth-submit" type="submit" id="authSubmit">Войти в APPNEST</button><button type="button" id="authGuest" class="auth-guest" style="width:100%;margin-top:10px;border:1px solid #3a3a4a;border-radius:12px;padding:13px;background:#191a26;color:#eee;font-weight:700">Продолжить как гость</button><button type="button" id="authRecovery" class="auth-guest" style="width:100%;margin-top:8px;border:1px solid #3a3a4a;border-radius:12px;padding:12px;background:transparent;color:#c9c7d8">Вход администратора по резервному коду</button>
         <div class="auth-error" id="authError" role="alert"></div>
       </form>
       <div class="auth-foot">Пароль хранится в виде криптографического хеша. Не используй пароль от других сервисов.</div>
@@ -199,6 +199,7 @@
         gate.classList.remove("open");
         await loadProfileData();
         await loadAds();
+        if(state.isAdmin&&new URLSearchParams(window.location.search).get("admin")==="1"){navigate("admin");window.history.replaceState({}, "", window.location.pathname);}
         toast(mode==="register"?"Аккаунт создан":"Вход выполнен");
       }catch(e){error.textContent=e.message||"Не удалось выполнить вход";}
       finally{button.disabled=false;}
@@ -215,6 +216,7 @@
       }catch(e){error.textContent=e.message||"Не удалось открыть гостевой доступ";}
       finally{button.disabled=false;}
     });
+    $("#authRecovery",gate).addEventListener("click",async()=>{const code=prompt("Введите одноразовый резервный код администратора");if(!code)return;const button=$("#authRecovery",gate),error=$("#authError",gate);button.disabled=true;error.textContent="";try{await request("/auth/admin-recovery",{method:"POST",body:JSON.stringify({code})});gate.classList.remove("open");await loadProfileData();if(state.isAdmin){navigate("admin");toast("Вход администратора выполнен");}else{throw new Error("У этой учётной записи нет прав администратора");}}catch(e){error.textContent=e.message||"Не удалось войти";}finally{button.disabled=false;}});
     gate.addEventListener("click",event=>{if(event.target===gate)event.preventDefault();});
     return gate;
   }
@@ -687,7 +689,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
         <section data-extra-panel="ads" hidden><h3>Рекламная кампания</h3><form id="adForm"><input name="title" placeholder="Название кампании" required><select name="kind"><option value="banner">Баннер</option><option value="channel">Telegram-канал</option><option value="task">Задание</option></select><input name="creative_url" placeholder="URL изображения (необязательно)"><input name="target_url" placeholder="HTTPS ссылка" required><label>Начало<input name="starts_at" type="datetime-local" required></label><label>Окончание<input name="ends_at" type="datetime-local" required></label><button>Создать кампанию</button></form><p>Частота: не более 3 показов одного объявления пользователю в день.</p></section>
         <section data-extra-panel="users" hidden><h3>Пользователи</h3><div>${(users.users||[]).map(u=>`<p>${escapeHTML(u.first_name)} @${escapeHTML(u.username||"")} · ${escapeHTML(u.telegram_id)} · ${u.is_blocked?"заблокирован":"активен"} <button data-user-block="${escapeHTML(u.telegram_id)}" data-blocked="${u.is_blocked?0:1}">${u.is_blocked?"Разблокировать":"Заблокировать"}</button></p>`).join("")}</div></section>
         <section data-extra-panel="notifications" hidden><h3>Новое уведомление</h3><form id="notificationForm"><input name="title" placeholder="Заголовок" required><textarea name="message" placeholder="Сообщение" required></textarea><button>Опубликовать</button></form><h3>Опубликованные уведомления</h3>${(notifications.notifications||[]).map(n=>`<p>${escapeHTML(n.title)} · ${n.active?"активно":"скрыто"} <button data-notification-toggle="${n.id}" data-active="${n.active?0:1}">${n.active?"Скрыть":"Показать"}</button></p>`).join("")}</section>
-        <section data-extra-panel="audit" hidden><h3>Последние действия администратора</h3>${auditRows}</section><section data-extra-panel="telegram" hidden><h3>Подключение Telegram</h3><p>Установить кнопку запуска APPNEST в меню бота.</p><button class="primary-button" id="telegramMenuButton" type="button">Установить кнопку «Открыть APPNEST»</button></section>`;
+        <section data-extra-panel="audit" hidden><h3>Последние действия администратора</h3>${auditRows}</section><section data-extra-panel="telegram" hidden><h3>Подключение Telegram</h3><p>Установить кнопку запуска APPNEST в меню бота.</p><button class="primary-button" id="telegramMenuButton" type="button">Установить кнопку «Открыть APPNEST»</button><hr><h3>Проверка тестового канала</h3><p>Добавь @Appnest1_bot администратором. Проверка не включает обязательную подписку для пользователей.</p><form id="channelVerifyForm"><input name="chat_id" value="https://t.me/zzzx_hb" required><button class="secondary-button">Проверить и подключить канал</button></form><div id="channelVerifyResult"></div><hr><h3>Диагностика APPNEST</h3><button type="button" class="secondary-button" id="runDiagnostics">Проверить API, D1, R2 и Telegram</button><div id="diagnosticsResult"></div><hr><h3>Резервный доступ администратора</h3><p>Одноразовые коды для входа, если Telegram и обычный вход недоступны.</p><button type="button" class="secondary-button" id="generateRecoveryCodes">Создать 8 резервных кодов</button><button type="button" class="secondary-button" id="revokeRecoveryCodes">Отозвать все коды</button></section>`;
       const modeSelect=$("#subscriptionMode");if(modeSelect)modeSelect.value=data.subscription_mode||"all";
       $("#adminAppsList").querySelectorAll(".admin-actions button").forEach(b=>b.classList.add("secondary-button"));
     } catch(error){toast("Не удалось загрузить панель: "+error.message);}
@@ -963,6 +965,21 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
       return;
     }
 
+    const recoveryGenerate=event.target.closest("#generateRecoveryCodes");
+    if(recoveryGenerate){
+      if(!confirm("Создать новые коды? Все предыдущие перестанут работать."))return;
+      recoveryGenerate.disabled=true;
+      request("/admin/recovery-codes",{method:"POST",body:JSON.stringify({})}).then(data=>{
+        const codes=(data.codes||[]).join("\n");
+        openModal("<h2>Резервные коды</h2><p>Сохрани их сейчас. Каждый код одноразовый; повторно показать их нельзя.</p><textarea id=\"recoveryCodesText\" readonly rows=\"10\" style=\"width:100%;font-family:monospace\">"+escapeHTML(codes)+"</textarea><button type=\"button\" class=\"primary-button full-button\" id=\"copyRecoveryCodes\">Скопировать коды</button>");
+      }).catch(e=>toast(e.message)).finally(()=>{recoveryGenerate.disabled=false;});return;
+    }
+    const recoveryRevoke=event.target.closest("#revokeRecoveryCodes");
+    if(recoveryRevoke){if(!confirm("Отозвать все резервные коды?"))return;request("/admin/recovery-codes",{method:"DELETE",body:JSON.stringify({})}).then(()=>toast("Резервные коды отозваны")).catch(e=>toast(e.message));return;}
+    const copyRecovery=event.target.closest("#copyRecoveryCodes");
+    if(copyRecovery){const value=$("#recoveryCodesText")?.value||"";if(navigator.clipboard?.writeText)navigator.clipboard.writeText(value).then(()=>toast("Скопировано")).catch(()=>toast("Скопируй коды вручную"));else toast("Выдели и скопируй коды вручную");return;}
+    const runDiagnostics=event.target.closest("#runDiagnostics");
+    if(runDiagnostics){runDiagnostics.disabled=true;request("/admin/diagnostics").then(data=>{$("#diagnosticsResult").innerHTML=Object.entries(data.checks||{}).map(([key,item])=>"<p><strong>"+escapeHTML(key)+":</strong> "+escapeHTML(item.status||"unknown")+(item.username?" · @"+escapeHTML(item.username):"")+"</p>").join("");}).catch(e=>$("#diagnosticsResult").textContent=e.message).finally(()=>{runDiagnostics.disabled=false;});return;}
     const telegramMenuButton=event.target.closest("#telegramMenuButton");
     if(telegramMenuButton){
       telegramMenuButton.disabled=true;
@@ -1111,6 +1128,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
     if(form.id==="updateApkForm"){event.preventDefault();const d=new FormData(form),file=d.get("apk"),button=form.querySelector("button");button.disabled=true;const status=$("#uploadStatus");status.hidden=false;uploadFileMultipart(file,"apk",{app_id:Number(form.dataset.appId),version:d.get("version"),version_code:Number(d.get("version_code")),min_android:d.get("min_android"),release_notes:d.get("release_notes")},setUploadProgress).then(()=>{closeModal();toast("Обновление загружено");loadAdmin();loadApps();}).catch(e=>{status.textContent="Ошибка: "+e.message+" · Нажмите повторить";button.disabled=false;button.textContent="Повторить загрузку";toast(e.message);});}
     if(form.id==="categoryForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/categories",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
     if(form.id==="channelForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/channels",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
+    if(form.id==="channelVerifyForm"){event.preventDefault();const button=form.querySelector("button"),result=$("#channelVerifyResult");button.disabled=true;result.textContent="Проверяем права бота…";request("/admin/diagnostics/channel",{method:"POST",body:JSON.stringify({chat_id:new FormData(form).get("chat_id")})}).then(data=>{result.textContent="Канал подключён: "+data.channel.title+" · ID "+data.channel.id+". Обязательная подписка выключена.";toast("Бот подтверждён как администратор");loadAdmin();}).catch(e=>{result.textContent=e.message;toast(e.message);}).finally(()=>{button.disabled=false;});}
     if(form.id==="editAdForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));d.starts_at=new Date(d.starts_at).toISOString().replace("T"," ").slice(0,19);d.ends_at=new Date(d.ends_at).toISOString().replace("T"," ").slice(0,19);d.priority=Number(d.priority)||0;request("/admin/ads/"+form.dataset.adId,{method:"PATCH",body:JSON.stringify(d)}).then(()=>{closeModal();loadAdmin();}).catch(e=>toast(e.message));}
     if(form.id==="adForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));d.starts_at=new Date(d.starts_at).toISOString().replace("T"," ").slice(0,19);d.ends_at=new Date(d.ends_at).toISOString().replace("T"," ").slice(0,19);request("/admin/ads",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
     if(form.id==="notificationForm"){event.preventDefault();const d=Object.fromEntries(new FormData(form));request("/admin/notifications",{method:"POST",body:JSON.stringify(d)}).then(loadAdmin).catch(e=>toast(e.message));}
@@ -1138,6 +1156,7 @@ $("#adminUsersCount").textContent=data.users_count??"—";$("#adminDownloadsCoun
 
     renderProfile();
     applyTranslations();
+    if(new URLSearchParams(window.location.search).get("admin")==="1"&&state.isAdmin){navigate("admin");window.history.replaceState({}, "", window.location.pathname);}
   }
 
   start();

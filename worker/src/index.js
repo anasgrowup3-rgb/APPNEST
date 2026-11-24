@@ -115,6 +115,22 @@ async function authEndpoint(request,env,path,method) {
     const token=await issueWebSession(env,row.user_id),user=await webUserById(env,row.user_id);
     return json({success:true,user,is_admin:await webAdmin(env,row.user_id)},200,{"set-cookie":sessionCookie(token)});
   }
+  if(path==="/auth/admin-recovery"&&method==="POST"){
+    const ip=request.headers.get("CF-Connecting-IP")||"unknown";
+    if(await rateLimit(env,"admin-recovery:"+ip,5,900))return fail("Слишком много попыток. Подождите 15 минут.",429);
+    const b=await readJson(request),code=clean(b.code,80).toUpperCase().replace(/[^A-F0-9]/g,"");
+    if(!/^[A-F0-9]{32}$/.test(code))return fail("Неверный или использованный резервный код",401);
+    const codeHash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(code)));
+    const row=await env.DB.prepare("SELECT id,user_id FROM appnest_admin_recovery_codes WHERE code_hash=? AND used_at IS NULL").bind(codeHash).first();
+    if(!row||!(await webAdmin(env,row.user_id)))return fail("Неверный или использованный резервный код",401);
+    const used=await env.DB.prepare("UPDATE appnest_admin_recovery_codes SET used_at=datetime('now') WHERE id=? AND used_at IS NULL").bind(row.id).run();
+    if(!used.meta?.changes)return fail("Неверный или использованный резервный код",401);
+    const blocked=await env.DB.prepare("SELECT is_blocked FROM users WHERE telegram_id=?").bind(row.user_id).first();
+    if(blocked?.is_blocked)return fail("Доступ к сервису ограничен",403);
+    const token=await issueWebSession(env,row.user_id),user=await webUserById(env,row.user_id);
+    await audit(env,row.user_id,"admin.recovery_login","single-use-code");
+    return json({success:true,user,is_admin:true},200,{"set-cookie":sessionCookie(token)});
+  }
   if(path==="/auth/logout"&&method==="POST"){
     const token=cookieValue(request,"appnest_session");
     if(token){const hash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(token)));await env.DB.prepare("DELETE FROM appnest_auth_sessions WHERE token_hash=?").bind(hash).run();}
@@ -177,6 +193,9 @@ async function audit(env, actor, action, target, details = "") {
 async function subscriptionCheck(env, userId) {
   const { results = [] } = await env.DB.prepare("SELECT chat_id, title, invite_url FROM appnest_required_channels WHERE enabled=1").all();
   if (!results.length || env.TELEGRAM_SUBSCRIPTIONS_ENABLED !== "true") return { allowed: true, channels: [] };
+  if (!/^\d+$/.test(String(userId)) || !Number.isSafeInteger(Number(userId))) {
+    return { allowed: false, unavailable: false, telegram_required: true, channels: results };
+  }
   if (!env.BOT_TOKEN) return { allowed: false, unavailable: true, channels: results };
   const checks = await Promise.all(results.map(async channel => {
     try {
@@ -329,7 +348,7 @@ async function handle(request, env) {
     const app=await env.DB.prepare("SELECT id,apk_key FROM appnest_apps WHERE id=? AND status='published' AND apk_key IS NOT NULL").bind(appId).first();
     if(!app) return fail("Приложение не найдено",404);
     const subs=await subscriptionCheck(env,userId);
-    if(!subs.allowed) return json({success:false,error:subs.unavailable?"Не удалось проверить подписки. Повторите попытку позже.":"Для скачивания необходимо подписаться на каналы",subscription_required:true,mode:subs.unavailable?"unavailable":"required",channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed}))},403);
+    if(!subs.allowed) return json({success:false,error:subs.telegram_required?"Для проверки подписки войдите в APPNEST через Telegram.":(subs.unavailable?"Не удалось проверить подписки. Повторите попытку позже.":"Для скачивания необходимо подписаться на каналы"),subscription_required:true,telegram_required:subs.telegram_required===true,mode:subs.telegram_required?"telegram_required":(subs.unavailable?"unavailable":"required"),channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed}))},403);
     const bytes=crypto.getRandomValues(new Uint8Array(32)),token=hex(bytes),hash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(token))),expiry=Math.floor(Date.now()/1000)+60;
     await env.DB.prepare("INSERT INTO appnest_download_tokens(token_hash,user_id,app_id,expires_at) VALUES(?,?,?,?)").bind(hash,userId,appId,expiry).run();
     return json({success:true,url:"/api/download/"+token,expires_at:expiry});
@@ -339,7 +358,7 @@ async function handle(request, env) {
     const app = await env.DB.prepare("SELECT id,apk_key,apk_sha256,title FROM appnest_apps WHERE id=? AND status='published'").bind(appId).first();
     if (!app || !app.apk_key) return fail("Приложение не найдено",404);
     const subs = await subscriptionCheck(env,userId);
-    if (!subs.allowed) return json({ success:false, error:subs.unavailable ? "Не удалось проверить подписки. Повторите попытку позже." : "Для скачивания необходимо подписаться на каналы", subscription_required:true, mode:subs.unavailable ? "unavailable" : "required", channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed})) },403);
+    if (!subs.allowed) return json({ success:false, error:subs.telegram_required ? "Для проверки подписки войдите в APPNEST через Telegram." : (subs.unavailable ? "Не удалось проверить подписки. Повторите попытку позже." : "Для скачивания необходимо подписаться на каналы"), subscription_required:true, telegram_required:subs.telegram_required===true, mode:subs.telegram_required ? "telegram_required" : (subs.unavailable ? "unavailable" : "required"), channels:subs.channels.map(c=>({title:c.title,invite_url:c.invite_url,subscribed:c.subscribed})) },403);
     if (!env.FILES) return fail("R2 binding FILES не настроен",503);
     const object = await env.FILES.get(app.apk_key);
     if (!object) return fail("APK-файл временно недоступен",404);
@@ -378,6 +397,51 @@ async function handle(request, env) {
     if(!session.isAdmin) return fail("Недостаточно прав",403);
     const admin = session;
 
+    if(path==="/admin/recovery-codes"&&method==="POST"){
+      const codes=Array.from({length:8},()=>hex(crypto.getRandomValues(new Uint8Array(16))));
+      await env.DB.prepare("DELETE FROM appnest_admin_recovery_codes WHERE user_id=?").bind(userId).run();
+      await env.DB.batch(await Promise.all(codes.map(async code=>{
+        const hash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(code)));
+        return env.DB.prepare("INSERT INTO appnest_admin_recovery_codes(user_id,code_hash) VALUES(?,?)").bind(userId,hash);
+      })));
+      await audit(env,userId,"admin.recovery_codes.rotate","8 codes");
+      return json({success:true,codes,warning:"Сохраните коды сейчас. Повторно показать их нельзя."});
+    }
+    if(path==="/admin/recovery-codes"&&method==="DELETE"){
+      await env.DB.prepare("DELETE FROM appnest_admin_recovery_codes WHERE user_id=?").bind(userId).run();
+      await audit(env,userId,"admin.recovery_codes.revoke","all");
+      return json({success:true});
+    }
+    if(path==="/admin/diagnostics"&&method==="GET"){
+      const result={api:{status:"ok"},database:{status:"unknown"},storage:{status:env.FILES?"configured":"missing"},telegram:{status:env.BOT_TOKEN?"unknown":"missing"}};
+      try{await env.DB.prepare("SELECT 1 AS ok").first();result.database={status:"ok"};}catch{result.database={status:"error"};}
+      if(env.FILES){try{await env.FILES.head("appnest-health-check-nonexistent");result.storage={status:"ok"};}catch{result.storage={status:"error"};}}
+      if(env.BOT_TOKEN){
+        try{const response=await fetch("https://api.telegram.org/bot"+env.BOT_TOKEN+"/getMe");const data=await response.json();result.telegram=data.ok?{status:"ok",username:data.result?.username||null}:{status:"error"};}
+        catch{result.telegram={status:"error"};}
+      }
+      return json({success:true,checks:result});
+    }
+    if(path==="/admin/diagnostics/channel"&&method==="POST"){
+      if(!env.BOT_TOKEN)return fail("BOT_TOKEN не настроен",503);
+      const b=await readJson(request);
+      let chat=clean(b.chat_id,120);
+      chat=chat.replace("https://t.me/","").replace("http://t.me/","").replace("https://telegram.me/","").replace(/^@/,"").replace(/\/$/,"");
+      if(!/^[A-Za-z0-9_]{5,32}$/.test(chat))return fail("Укажите публичный канал в формате @username или https://t.me/username");
+      const [chatResponse,meResponse]=await Promise.all([
+        fetch("https://api.telegram.org/bot"+env.BOT_TOKEN+"/getChat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:"@"+chat})}),
+        fetch("https://api.telegram.org/bot"+env.BOT_TOKEN+"/getMe")
+      ]);
+      const [chatData,meData]=await Promise.all([chatResponse.json(),meResponse.json()]);
+      if(!chatData.ok||!meData.ok)return fail("Telegram не смог открыть канал. Проверьте ссылку и доступ бота.",502);
+      const memberResponse=await fetch("https://api.telegram.org/bot"+env.BOT_TOKEN+"/getChatMember",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:chatData.result.id,user_id:meData.result.id})});
+      const memberData=await memberResponse.json();
+      const botIsAdmin=memberData.ok&&["creator","administrator"].includes(memberData.result?.status);
+      if(!botIsAdmin)return json({success:false,bot_is_admin:false,channel:{id:String(chatData.result.id),title:clean(chatData.result.title,120),username:chatData.result.username||chat},error:"Бот найден, но не является администратором канала."},409);
+      await env.DB.prepare("INSERT INTO appnest_required_channels(chat_id,title,invite_url,enabled) VALUES(?,?,?,0) ON CONFLICT(chat_id) DO UPDATE SET title=excluded.title,invite_url=excluded.invite_url").bind(String(chatData.result.id),clean(chatData.result.title,120),"https://t.me/"+(chatData.result.username||chat)).run();
+      await audit(env,userId,"channel.verify",String(chatData.result.id),"bot admin confirmed; disabled");
+      return json({success:true,bot_is_admin:true,enabled:false,channel:{id:String(chatData.result.id),title:clean(chatData.result.title,120),username:chatData.result.username||chat},message:"Канал подключён в тестовом режиме: обязательная подписка пока выключена."});
+    }
     if (path === "/admin/telegram/menu-button" && method === "POST") {
       if (!env.BOT_TOKEN) return fail("BOT_TOKEN не настроен", 503);
       const telegramResponse = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/setChatMenuButton", {
@@ -720,6 +784,9 @@ export default {
       .map(value => value.trim()).filter(Boolean);
     const cors = { "vary": "Origin", "access-control-allow-credentials": "true" };
     if (origin && allowedOrigins.includes(origin)) cors["access-control-allow-origin"] = origin;
+    if (!["GET","HEAD","OPTIONS"].includes(request.method) && origin && !allowedOrigins.includes(origin)) {
+      return new Response(JSON.stringify({success:false,error:"Origin not allowed"}),{status:403,headers:JSON_HEADERS});
+    }
     try {
       const response = await handle(request,env);
       const headers = new Headers(response.headers);

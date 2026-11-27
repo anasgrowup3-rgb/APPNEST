@@ -119,7 +119,27 @@ The test harness creates cryptographically HMAC-signed Telegram initData payload
 
 ### Run the integration suite
 
-Set these variables in a private local `.env.integration` file (which is ignored by Git):
+There are two explicit modes:
+
+**Storage/API mode (requires one admin and one separate regular Telegram account):** exercises D1, R2 multipart, checksum verification, media isolation, download tickets, ads, feedback, notifications, and admin authorization. It deliberately leaves subscription enforcement disabled and does not claim to test channel membership.
+
+```dotenv
+APPNEST_TEST_SKIP_SUBSCRIPTION_TESTS=true
+APPNEST_TEST_BASE_URL=https://YOUR-INTEGRATION-WORKER.workers.dev
+APPNEST_TEST_BOT_TOKEN=YOUR_BOT_TOKEN
+APPNEST_TEST_ADMIN_ID=YOUR_CONFIGURED_TEST_ADMIN_ID
+APPNEST_TEST_USER_ID=YOUR_SEPARATE_REGULAR_TEST_USER_ID
+```
+
+Run:
+```sh
+cd worker
+node --env-file=../.env.integration test/real-integration.mjs
+```
+
+**Full Telegram membership mode:** requires the four distinct Telegram accounts and two disposable channels described below. It verifies the real all/any membership matrix and download gating. Do not set `APPNEST_TEST_SKIP_SUBSCRIPTION_TESTS` in this mode.
+
+Set the full-mode variables in a private local `.env.integration` file (which is ignored by Git):
 
 ```dotenv
 APPNEST_TEST_BASE_URL=https://YOUR-INTEGRATION-WORKER.workers.dev

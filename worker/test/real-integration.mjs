@@ -14,7 +14,7 @@ const required = [
 ];
 for (const key of required) if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
 
-const base = process.env.APPNEST_TEST_BASE_URL.replace(/\\/+$/, "");
+const base = process.env.APPNEST_TEST_BASE_URL.replace(/\/+$/, "");
 const target = new URL(base);
 if (target.protocol !== "https:" || !target.hostname.startsWith("appnest-integration-api.") || target.username || target.password) {
   throw new Error("Refusing integration target: APPNEST_TEST_BASE_URL must be the HTTPS workers.dev URL for appnest-integration-api");

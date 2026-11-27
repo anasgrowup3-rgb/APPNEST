@@ -43,8 +43,9 @@ The integration Worker has separate D1 and R2 resources. Never run destructive o
 ### Repository and CI
 
 - Current `main` commit at inspection: `393cbdd8e1a7be491360d03dbc791af8e37fd1f6`.
-- Latest GitHub Actions run inspected: `APPNEST validation`, run `45443270158`, completed successfully on 2026-11-24.
-- CI passed JavaScript syntax checks, **42 Worker tests**, and **19 Python tests** (bot security, frontend static acceptance, and migration smoke tests).
+- Previous `main` run inspected: `APPNEST validation`, run `45443270158`, completed successfully on 2026-11-24.
+- Current change-branch run: `APPNEST validation`, run `45927391825`, completed successfully on 2026-11-27.
+- Current branch CI passed JavaScript syntax checks, **45 Worker tests**, and **19 Python tests** (bot security, frontend static acceptance, and migration smoke tests).
 - The migration smoke test uses an in-memory SQLite database. It proves that the checked-in SQL files apply together in that test database; it does not prove that the production D1 database has an identical legacy schema.
 - `worker/test/real-integration.mjs` exists for the isolated integration Worker. It requires dedicated test Telegram accounts, two test channels, and integration environment variables. Do not claim it passed unless it is actually run and its result is recorded.
 
@@ -197,7 +198,7 @@ Design implications: keep APKs in Standard storage, use multipart upload for lar
 - [ ] Bot is administrator in every channel used for membership checks.
 - [x] Membership check uses `getChatMember` and supports all/any channel logic in source.
 - [x] The Worker fails closed when Telegram is unavailable.
-- [x] Bounded retry for Telegram 429 using `retry_after` and one retry for transient 5xx/network errors is being added in the current change branch; verify CI before merge.
+- [x] Bounded retry for Telegram 429 using `retry_after`; one retry for transient 5xx/network errors; regression tests pass in CI. Real Telegram channel checks remain unverified.
 - [ ] Subscription gate has a clear recheck action and useful unavailable state.
 - [ ] Do not repeatedly call Telegram's menu-button method after HTTP 429. Wait for the returned retry interval and make one controlled attempt.
 - [ ] Verify WebApp `ready()`, `expand()`, theme/viewport integration, BackButton, and MainButton where useful.
@@ -266,7 +267,8 @@ Do not announce APPNEST as production-ready until all of these pass:
 - Applied the additive `0005_admin_recovery_codes.sql` schema to the integration database and inserted the matching migration-ledger row. Re-read both the table and ledger to verify the change. No production data was changed.
 - Confirmed the latest existing CI run passed 42 Worker tests and 19 Python tests. These tests are not a substitute for the isolated live integration test.
 - Read the official Cloudflare Workers, D1, and R2 limits and the official Telegram Bot API `getChatMember` and `retry_after` documentation.
-- Found that `subscriptionCheck()` treated Telegram HTTP 429/5xx as unavailable without respecting `retry_after` or retrying transient errors. A bounded-retry fix and regression tests are being prepared on branch `fix/telegram-retry-and-plan-20261127`.
+- Found that `subscriptionCheck()` treated Telegram HTTP 429/5xx as unavailable without respecting `retry_after` or retrying transient errors. Added bounded retry handling and three regression tests on branch `fix/telegram-retry-and-plan-20261127`.
+- GitHub Actions run `45927391825` passed: syntax checks, 45 Worker tests, and 19 Python tests. No production Worker deployment was made.
 - Production catalogue remains empty. No fake apps were inserted.
 
 ### 2026-11-24 — APPNEST 2.0 visual redesign

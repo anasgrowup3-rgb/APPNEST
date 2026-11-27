@@ -313,7 +313,7 @@ passed("D1 feedback and notification workflows");
 const adminOverview = await call("/api/admin/overview", { userId: adminId });
 ok(adminOverview, 200, "admin overview");
 assert.ok(adminOverview.data.apps.some(x => x.id === appId));
-assert.ok(adminOverview.data.channels.length >= 2);
+assert.equal(adminOverview.data.channels.length, channels.length, "admin overview channel count matches the selected integration mode");
 assert.ok(adminOverview.data.ads.some(x => x.title === adTitle));
 passed("admin analytics read-back");
 

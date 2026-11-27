@@ -65,6 +65,7 @@ The integration Worker has separate D1 and R2 resources. Never run destructive o
 - Production also contains pre-existing legacy tables whose names and columns differ from the original standalone migration schema. For example, the legacy `ad_campaigns` table is not the APPNEST table used by the Worker. The Worker currently reads and writes `appnest_ad_campaigns` and `appnest_ad_frequency`.
 - The production database does **not** have a `d1_migrations` ledger table. Its migration history cannot be inferred from a migration log; inspect actual table definitions before any production migration.
 - The integration database has a `d1_migrations` ledger. On 2026-11-27, the missing `0005_admin_recovery_codes.sql` migration was applied additively to the integration database and recorded as migration 5. The table and ledger row were then read back and verified.
+- A read-only check on 2026-11-27 confirmed the integration D1 contains migrations 0001–0005 and currently has zero test users, apps, required channels, campaigns, feedback, notifications, and upload sessions. The integration R2 bucket has `r2.dev` disabled and no custom domains.
 - No production D1 records were deleted or modified during this inspection. The production Worker code was deployed separately after CI passed.
 
 ### Migration filenames — important clarification
@@ -228,6 +229,7 @@ Design implications: keep APKs in Standard storage, use multipart upload for lar
 - [ ] D1 backup/export and R2 object-inventory recovery plan.
 - [x] CI checks Worker syntax, Worker tests, frontend static checks, bot security checks, and migration smoke tests.
 - [ ] Run isolated real integration tests and production smoke tests.
+- [x] Fixed integration harness preflight to validate bot/channel/admin/user membership before any fixture writes and explicitly enable subscription enforcement in the isolated DB; CI static checks added. Live Telegram-backed integration run still requires the dedicated test accounts/channels and local secret file.
 - [ ] Document rollback steps before production deployment.
 
 ### UI quality
@@ -289,3 +291,13 @@ Do not announce APPNEST as production-ready until all of these pass:
 - Production Worker deployment and bindings were previously updated. Re-verify live behavior before claiming the current code is deployed.
 - Telegram menu-button setup previously returned HTTP 429. Do not repeat the same call without respecting Telegram's retry interval.
 - Limitation: public HTTP/Telegram WebView smoke tests were not completed in that session.
+
+
+### 2026-11-27 — integration harness hardening
+
+- Read the real integration harness and found two correctness gaps: it wrote D1 fixtures before checking Telegram credentials/channel setup, and it never enabled the `subscriptions_enabled` setting even though later assertions expected channel membership enforcement.
+- Updated the harness to preflight `getMe`, bot admin status in both channels, and the expected membership matrix for three separate test users before any D1/R2 mutations.
+- Added explicit isolated `subscriptions_enabled=true` setup before all/any membership tests.
+- Added static CI checks that enforce preflight-before-mutation and gate-enabled-before-membership-test ordering.
+- Verified the integration bucket has managed `r2.dev` access disabled and no custom domains. Verified integration D1 has migrations 0001–0005 and zero fixture rows before this work.
+- The actual live test has not yet been run: it requires the dedicated test Telegram accounts/channels and a local `.env.integration` file. Never paste the bot token into chat or commit it.

@@ -86,13 +86,13 @@ async function authEndpoint(request,env,path,method) {
     if(blocked?.is_blocked)return fail("Доступ к сервису ограничен",403);
     const token=await issueWebSession(env,tg.id);
     await audit(env,tg.id,"admin.telegram_login","verified-initData");
-    return json({success:true,user:await webUserById(env,tg.id),is_admin:true},200,{"set-cookie":sessionCookie(token)});
+    return json({success:true,user:await webUserById(env,tg.id),is_admin:true,session_token:token},200,{"set-cookie":sessionCookie(token)});
   }
   if(path==="/auth/guest"&&method==="POST"){
     const ip=request.headers.get("CF-Connecting-IP")||"unknown";
     if(await rateLimit(env,"guest:"+ip,10,3600))return fail("Слишком много гостевых сессий с этого подключения. Попробуйте позже.",429);
     const account=await createGuestAccount(env);
-    return json({success:true,user:account.user,is_admin:false,guest:true},201,{"set-cookie":sessionCookie(account.token)});
+    return json({success:true,user:account.user,is_admin:false,guest:true,session_token:account.token},201,{"set-cookie":sessionCookie(account.token)});
   }
   if(path==="/auth/register"&&method==="POST"){
     const b=await readJson(request),email=clean(b.email,254).toLowerCase(),password=typeof b.password==="string"?b.password:"",name=clean(b.name,80);
@@ -113,7 +113,7 @@ async function authEndpoint(request,env,path,method) {
     const derived=await passwordHash(password);
     await env.DB.prepare("INSERT INTO appnest_credentials(user_id,email,password_salt,password_hash) VALUES(?,?,?,?)").bind(userId,email,derived.salt,derived.hash).run();
     const token=await issueWebSession(env,userId),user=await webUserById(env,userId);
-    return json({success:true,user,is_admin:await webAdmin(env,userId)},201,{"set-cookie":sessionCookie(token)});
+    return json({success:true,user,is_admin:await webAdmin(env,userId),session_token:token},201,{"set-cookie":sessionCookie(token)});
   }
   if(path==="/auth/login"&&method==="POST"){
     const b=await readJson(request),email=clean(b.email,254).toLowerCase(),password=typeof b.password==="string"?b.password:"";
@@ -125,7 +125,7 @@ async function authEndpoint(request,env,path,method) {
     if(!constantTimeEqual(candidate.hash,row.password_hash))return fail("Неверная почта или пароль",401);
     if(row.is_blocked)return fail("Доступ к сервису ограничен",403);
     const token=await issueWebSession(env,row.user_id),user=await webUserById(env,row.user_id);
-    return json({success:true,user,is_admin:await webAdmin(env,row.user_id)},200,{"set-cookie":sessionCookie(token)});
+    return json({success:true,user,is_admin:await webAdmin(env,row.user_id),session_token:token},200,{"set-cookie":sessionCookie(token)});
   }
   if(path==="/auth/admin-recovery"&&method==="POST"){
     const ip=request.headers.get("CF-Connecting-IP")||"unknown";
@@ -141,10 +141,10 @@ async function authEndpoint(request,env,path,method) {
     if(blocked?.is_blocked)return fail("Доступ к сервису ограничен",403);
     const token=await issueWebSession(env,row.user_id),user=await webUserById(env,row.user_id);
     await audit(env,row.user_id,"admin.recovery_login","single-use-code");
-    return json({success:true,user,is_admin:true},200,{"set-cookie":sessionCookie(token)});
+    return json({success:true,user,is_admin:true,session_token:token},200,{"set-cookie":sessionCookie(token)});
   }
   if(path==="/auth/logout"&&method==="POST"){
-    const token=cookieValue(request,"appnest_session");
+    const token=cookieValue(request,"appnest_session") || (request.headers.get("Authorization")||"").replace(/^Bearer\\s+/i,"").trim();
     if(token){const hash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(token)));await env.DB.prepare("DELETE FROM appnest_auth_sessions WHERE token_hash=?").bind(hash).run();}
     return json({success:true},200,{"set-cookie":sessionCookie("",0)});
   }
@@ -170,13 +170,15 @@ async function rateLimit(env, key, limit = 60, windowSeconds = 60) {
 }
 async function auth(request, env) {
   const cookie=cookieValue(request,"appnest_session");
+  const bearer=(request.headers.get("Authorization")||"").match(/^Bearer\\s+([a-f0-9]{64})$/i)?.[1]||"";
+  const sessionToken=bearer||cookie;
   // A cryptographically verified Telegram initData of a configured administrator always wins over a
   // pre-existing (e.g. guest) cookie session: this is the original "open the bot as admin" login.
   const rawInitData=request.headers.get("X-Telegram-Init-Data")||"";
   const telegramUser=rawInitData?await verifyTelegram(rawInitData,env.BOT_TOKEN,Number(env.TELEGRAM_AUTH_MAX_AGE||86400)):null;
   const telegramAdmin=!!(telegramUser&&await webAdmin(env,telegramUser.id));
-  if(cookie&&!telegramAdmin){
-    const tokenHash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(cookie)));
+  if(sessionToken&&!telegramAdmin){
+    const tokenHash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(sessionToken)));
     const row=await env.DB.prepare("SELECT user_id,expires_at FROM appnest_auth_sessions WHERE token_hash=?").bind(tokenHash).first();
     if(row&&row.expires_at>Math.floor(Date.now()/1000)){
       const user=await webUserById(env,row.user_id);

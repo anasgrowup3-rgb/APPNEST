@@ -58,7 +58,7 @@ async function issueWebSession(env,userId) {
   return token;
 }
 async function webUserById(env,userId) {
-  const row=await env.DB.prepare("SELECT u.telegram_id,u.username,u.first_name,u.last_name,u.photo_url,u.is_blocked,c.email FROM users u LEFT JOIN appnest_credentials c ON c.user_id=u.telegram_id WHERE u.telegram_id=?").bind(userId).first();
+  const row=await env.DB.prepare("SELECT u.telegram_id,u.username,u.first_name,u.last_name,'' AS photo_url,u.is_blocked,c.email FROM users u LEFT JOIN appnest_credentials c ON c.user_id=u.telegram_id WHERE u.telegram_id=?").bind(userId).first();
   if(!row)return null;
   return {id:String(row.telegram_id),username:row.username||"",first_name:row.first_name||"",last_name:row.last_name||"",photo_url:row.photo_url||"",email:row.email||""};
 }
@@ -81,7 +81,7 @@ async function authEndpoint(request,env,path,method) {
     if(await rateLimit(env,"admin-telegram:"+ip,5,900))return fail("Слишком много попыток. Подождите 15 минут.",429);
     const tg=await verifyTelegram(request.headers.get("X-Telegram-Init-Data")||"",env.BOT_TOKEN,Number(env.TELEGRAM_AUTH_MAX_AGE||86400));
     if(!tg||!(await webAdmin(env,tg.id)))return fail("Откройте APPNEST через Telegram-бота с главным аккаунтом администратора.",401);
-    await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name,last_name,photo_url) VALUES(?,?,?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username,first_name=excluded.first_name,last_name=excluded.last_name,photo_url=CASE WHEN excluded.photo_url<>'' THEN excluded.photo_url ELSE users.photo_url END").bind(tg.id,tg.username,tg.first_name,tg.last_name,tg.photo_url).run();
+    await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name,last_name) VALUES(?,?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username,first_name=excluded.first_name,last_name=excluded.last_name").bind(tg.id,tg.username,tg.first_name,tg.last_name).run();
     const blocked=await env.DB.prepare("SELECT is_blocked FROM users WHERE telegram_id=?").bind(tg.id).first();
     if(blocked?.is_blocked)return fail("Доступ к сервису ограничен",403);
     const token=await issueWebSession(env,tg.id);
@@ -104,7 +104,7 @@ async function authEndpoint(request,env,path,method) {
     const tg=await verifyTelegram(request.headers.get("X-Telegram-Init-Data")||"",env.BOT_TOKEN,Number(env.TELEGRAM_AUTH_MAX_AGE||86400));
     if(tg){
       userId=tg.id;
-      await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name,last_name,photo_url) VALUES(?,?,?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username,first_name=excluded.first_name,last_name=excluded.last_name,photo_url=CASE WHEN excluded.photo_url<>'' THEN excluded.photo_url ELSE users.photo_url END").bind(userId,tg.username,name,tg.last_name,tg.photo_url).run();
+      await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name,last_name) VALUES(?,?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username,first_name=excluded.first_name,last_name=excluded.last_name").bind(userId,tg.username,name,tg.last_name).run();
     }else{
       await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name) VALUES(?,?,?)").bind(userId,email.split("@")[0].slice(0,64),name).run();
     }
@@ -196,7 +196,7 @@ async function auth(request, env) {
   if(await rateLimit(env,"user:"+user.id,uploadPartRequest?600:120))return {error:fail("Слишком много запросов",429)};
   const blocked=await env.DB.prepare("SELECT is_blocked FROM users WHERE telegram_id=?").bind(user.id).first();
   if(blocked?.is_blocked)return {error:fail("Доступ к сервису ограничен",403)};
-  await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name,last_name,photo_url) VALUES(?,?,?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username,first_name=excluded.first_name,last_name=excluded.last_name,photo_url=CASE WHEN excluded.photo_url<>'' THEN excluded.photo_url ELSE users.photo_url END").bind(user.id,user.username,user.first_name,user.last_name,user.photo_url).run();
+  await env.DB.prepare("INSERT INTO users(telegram_id,username,first_name,last_name) VALUES(?,?,?,?) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username,first_name=excluded.first_name,last_name=excluded.last_name").bind(user.id,user.username,user.first_name,user.last_name).run();
   return {user,isAdmin:await webAdmin(env,user.id)};
 }
 async function adminAuth(request, env) {

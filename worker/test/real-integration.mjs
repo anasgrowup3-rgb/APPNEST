@@ -1,30 +1,39 @@
 import assert from "node:assert/strict";
 import { createHmac, createHash, randomUUID } from "node:crypto";
 
+const skipSubscriptionTests = process.env.APPNEST_TEST_SKIP_SUBSCRIPTION_TESTS === "true";
 const required = [
   "APPNEST_TEST_BASE_URL", "APPNEST_TEST_BOT_TOKEN", "APPNEST_TEST_ADMIN_ID",
-  "APPNEST_TEST_MEMBER_ALL_ID", "APPNEST_TEST_MEMBER_ONE_ID", "APPNEST_TEST_NONMEMBER_ID",
-  "APPNEST_TEST_CHANNEL_ONE_ID", "APPNEST_TEST_CHANNEL_ONE_URL",
-  "APPNEST_TEST_CHANNEL_TWO_ID", "APPNEST_TEST_CHANNEL_TWO_URL"
+  ...(skipSubscriptionTests
+    ? ["APPNEST_TEST_USER_ID"]
+    : [
+        "APPNEST_TEST_MEMBER_ALL_ID", "APPNEST_TEST_MEMBER_ONE_ID", "APPNEST_TEST_NONMEMBER_ID",
+        "APPNEST_TEST_CHANNEL_ONE_ID", "APPNEST_TEST_CHANNEL_ONE_URL",
+        "APPNEST_TEST_CHANNEL_TWO_ID", "APPNEST_TEST_CHANNEL_TWO_URL"
+      ])
 ];
 for (const key of required) if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
 
-const base = process.env.APPNEST_TEST_BASE_URL.replace(/\/+$/, "");
+const base = process.env.APPNEST_TEST_BASE_URL.replace(/\\/+$/, "");
 const target = new URL(base);
 if (target.protocol !== "https:" || !target.hostname.startsWith("appnest-integration-api.") || target.username || target.password) {
   throw new Error("Refusing integration target: APPNEST_TEST_BASE_URL must be the HTTPS workers.dev URL for appnest-integration-api");
 }
 const botToken = process.env.APPNEST_TEST_BOT_TOKEN;
 const adminId = String(process.env.APPNEST_TEST_ADMIN_ID);
-const memberAll = String(process.env.APPNEST_TEST_MEMBER_ALL_ID);
-const memberOne = String(process.env.APPNEST_TEST_MEMBER_ONE_ID);
-const nonmember = String(process.env.APPNEST_TEST_NONMEMBER_ID);
-const channels = [
+const memberAll = String(skipSubscriptionTests ? process.env.APPNEST_TEST_USER_ID : process.env.APPNEST_TEST_MEMBER_ALL_ID);
+const memberOne = String(skipSubscriptionTests ? process.env.APPNEST_TEST_USER_ID : process.env.APPNEST_TEST_MEMBER_ONE_ID);
+const nonmember = String(skipSubscriptionTests ? process.env.APPNEST_TEST_USER_ID : process.env.APPNEST_TEST_NONMEMBER_ID);
+const channels = skipSubscriptionTests ? [] : [
   { chat_id: String(process.env.APPNEST_TEST_CHANNEL_ONE_ID), invite_url: process.env.APPNEST_TEST_CHANNEL_ONE_URL, title: "APPNEST integration channel one" },
   { chat_id: String(process.env.APPNEST_TEST_CHANNEL_TWO_ID), invite_url: process.env.APPNEST_TEST_CHANNEL_TWO_URL, title: "APPNEST integration channel two" }
 ];
-assert.equal(new Set([adminId, memberAll, memberOne, nonmember]).size, 4, "Use four distinct test Telegram accounts");
-assert.equal(new Set(channels.map(x => x.chat_id)).size, 2, "Use two distinct test channels");
+if (skipSubscriptionTests) {
+  assert.notEqual(adminId, memberAll, "Use separate admin and regular test Telegram accounts");
+} else {
+  assert.equal(new Set([adminId, memberAll, memberOne, nonmember]).size, 4, "Use four distinct test Telegram accounts");
+  assert.equal(new Set(channels.map(x => x.chat_id)).size, 2, "Use two distinct test channels");
+}
 
 function telegramInitData(id) {
   const user = { id: Number(id), first_name: "APPNEST", last_name: "Integration", username: `appnest_test_${id}` };
@@ -88,28 +97,32 @@ async function telegram(method, parameters = {}) {
   throw new Error(`Telegram ${method} preflight exhausted its bounded retry`);
 }
 const bot = await telegram("getMe");
-for (const channel of channels) {
-  const botStatus = await telegram("getChatMember", { chat_id: channel.chat_id, user_id: bot.id });
-  assert.ok(["creator", "administrator"].includes(botStatus.status),
-    `Test bot must be an administrator in ${channel.chat_id}`);
-}
-const isMember = status => ["creator", "administrator", "member"].includes(status.status) ||
-  (status.status === "restricted" && status.is_member === true);
-const expectedMembership = [
-  { id: memberAll, expected: [true, true], label: "member-all" },
-  { id: memberOne, expected: [true, false], label: "member-one" },
-  { id: nonmember, expected: [false, false], label: "nonmember" }
-];
-for (const account of expectedMembership) {
-  const actual = [];
+if (!skipSubscriptionTests) {
   for (const channel of channels) {
-    const status = await telegram("getChatMember", { chat_id: channel.chat_id, user_id: Number(account.id) });
-    actual.push(isMember(status));
+    const botStatus = await telegram("getChatMember", { chat_id: channel.chat_id, user_id: bot.id });
+    assert.ok(["creator", "administrator"].includes(botStatus.status),
+      `Test bot must be an administrator in ${channel.chat_id}`);
   }
-  assert.deepEqual(actual, account.expected,
-    `Telegram test account ${account.label} has the wrong channel membership; expected ${account.expected}, got ${actual}`);
+  const isMember = status => ["creator", "administrator", "member"].includes(status.status) ||
+    (status.status === "restricted" && status.is_member === true);
+  const expectedMembership = [
+    { id: memberAll, expected: [true, true], label: "member-all" },
+    { id: memberOne, expected: [true, false], label: "member-one" },
+    { id: nonmember, expected: [false, false], label: "nonmember" }
+  ];
+  for (const account of expectedMembership) {
+    const actual = [];
+    for (const channel of channels) {
+      const status = await telegram("getChatMember", { chat_id: channel.chat_id, user_id: Number(account.id) });
+      actual.push(isMember(status));
+    }
+    assert.deepEqual(actual, account.expected,
+      `Telegram test account ${account.label} has the wrong channel membership; expected ${account.expected}, got ${actual}`);
+  }
+  passed("Telegram bot identity, channel admin permissions, and test-account membership preflight");
+} else {
+  passed("Telegram bot token preflight; subscription membership tests intentionally skipped");
 }
-passed("Telegram bot identity, channel admin permissions, and test-account membership preflight");
 
 // No database or object-storage fixtures have been created before the preflight above.
 const health = await call("/api/health");
@@ -142,24 +155,31 @@ for (const channel of channels) {
   ok(await call("/api/admin/channels", { userId: adminId, method: "POST", body: channel }), 201, "create isolated required channel");
 }
 const gate = await call("/api/admin/subscriptions-enabled", {
-  userId: adminId, method: "PUT", body: { enabled: true }
+  userId: adminId, method: "PUT", body: { enabled: !skipSubscriptionTests }
 });
-ok(gate, 200, "enable subscription enforcement in isolated test environment");
-assert.equal(gate.data.enabled, true);
+ok(gate, 200, skipSubscriptionTests ? "disable subscription enforcement for storage-only integration" : "enable subscription enforcement in isolated test environment");
+assert.equal(gate.data.enabled, !skipSubscriptionTests);
 ok(await call("/api/admin/subscription-mode", { userId: adminId, method: "PUT", body: { mode: "all" } }), 200, "set all-channel mode");
-const allStatus = await call("/api/subscription/status", { userId: memberAll });
-ok(allStatus, 200, "Telegram getChatMember for all-member account");
-assert.equal(allStatus.data.allowed, true, "all-member account must pass all mode");
-const oneInAll = await call("/api/subscription/status", { userId: memberOne });
-ok(oneInAll, 200, "Telegram getChatMember for one-channel account");
-assert.equal(oneInAll.data.allowed, false, "one-channel account must fail all mode");
-const noneInAll = await call("/api/subscription/status", { userId: nonmember });
-ok(noneInAll, 200, "Telegram getChatMember for non-member account");
-assert.equal(noneInAll.data.allowed, false, "non-member account must fail all mode");
-ok(await call("/api/admin/subscription-mode", { userId: adminId, method: "PUT", body: { mode: "any" } }), 200, "set any-channel mode");
-assert.equal((await call("/api/subscription/status", { userId: memberOne })).data.allowed, true, "one-channel account must pass any mode");
-assert.equal((await call("/api/subscription/status", { userId: nonmember })).data.allowed, false, "non-member account must fail any mode");
-passed("live Telegram getChatMember: all/any subscription matrix");
+if (!skipSubscriptionTests) {
+  const allStatus = await call("/api/subscription/status", { userId: memberAll });
+  ok(allStatus, 200, "Telegram getChatMember for all-member account");
+  assert.equal(allStatus.data.allowed, true, "all-member account must pass all mode");
+  const oneInAll = await call("/api/subscription/status", { userId: memberOne });
+  ok(oneInAll, 200, "Telegram getChatMember for one-channel account");
+  assert.equal(oneInAll.data.allowed, false, "one-channel account must fail all mode");
+  const noneInAll = await call("/api/subscription/status", { userId: nonmember });
+  ok(noneInAll, 200, "Telegram getChatMember for non-member account");
+  assert.equal(noneInAll.data.allowed, false, "non-member account must fail all mode");
+  ok(await call("/api/admin/subscription-mode", { userId: adminId, method: "PUT", body: { mode: "any" } }), 200, "set any-channel mode");
+  assert.equal((await call("/api/subscription/status", { userId: memberOne })).data.allowed, true, "one-channel account must pass any mode");
+  assert.equal((await call("/api/subscription/status", { userId: nonmember })).data.allowed, false, "non-member account must fail any mode");
+  passed("live Telegram getChatMember: all/any subscription matrix");
+} else {
+  const status = await call("/api/subscription/status", { userId: memberAll });
+  ok(status, 200, "subscription status when the membership suite is skipped");
+  assert.equal(status.data.allowed, true, "subscription gate must be disabled for storage-only integration");
+  passed("subscription gate remains disabled for storage-only integration");
+}
 
 const cancelled = await call("/api/admin/uploads", {
   userId: adminId, method: "POST",
@@ -241,13 +261,15 @@ ok(history, 200, "admin version history");
 assert.ok(history.data.versions.length >= 1);
 passed("D1 APK version history");
 
-await call("/api/admin/subscription-mode", { userId: adminId, method: "PUT", body: { mode: "all" } });
-ok(await call(`/api/apps/${appId}/download-ticket`, { userId: memberOne, method: "POST", body: {} }), 403, "all-mode download denied for one-channel member");
-ok(await call(`/api/apps/${appId}/download-ticket`, { userId: nonmember, method: "POST", body: {} }), 403, "all-mode download denied for non-member");
-await call("/api/admin/subscription-mode", { userId: adminId, method: "PUT", body: { mode: "any" } });
-ok(await call(`/api/apps/${appId}/download-ticket`, { userId: memberOne, method: "POST", body: {} }), 200, "any-mode download allowed for one-channel member");
-ok(await call(`/api/apps/${appId}/download-ticket`, { userId: nonmember, method: "POST", body: {} }), 403, "any-mode download denied for non-member");
-passed("download authorization enforces all/any channel membership");
+if (!skipSubscriptionTests) {
+  await call("/api/admin/subscription-mode", { userId: adminId, method: "PUT", body: { mode: "all" } });
+  ok(await call(`/api/apps/${appId}/download-ticket`, { userId: memberOne, method: "POST", body: {} }), 403, "all-mode download denied for one-channel member");
+  ok(await call(`/api/apps/${appId}/download-ticket`, { userId: nonmember, method: "POST", body: {} }), 403, "all-mode download denied for non-member");
+  await call("/api/admin/subscription-mode", { userId: adminId, method: "PUT", body: { mode: "any" } });
+  ok(await call(`/api/apps/${appId}/download-ticket`, { userId: memberOne, method: "POST", body: {} }), 200, "any-mode download allowed for one-channel member");
+  ok(await call(`/api/apps/${appId}/download-ticket`, { userId: nonmember, method: "POST", body: {} }), 403, "any-mode download denied for non-member");
+  passed("download authorization enforces all/any channel membership");
+}
 const ticket = await call(`/api/apps/${appId}/download-ticket`, { userId: memberAll, method: "POST", body: {} });
 ok(ticket, 200, "issue subscription-checked download ticket");
 const downloadUrl = base + ticket.data.url;

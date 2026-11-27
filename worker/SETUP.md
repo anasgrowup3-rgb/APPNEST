@@ -141,7 +141,7 @@ cd worker
 node --env-file=../.env.integration test/real-integration.mjs
 ```
 
-The script verifies real Worker HTTP requests, D1 CRUD, channel membership via Telegram, all/any subscription behavior, two-part 9 MiB+ multipart create/part retry/abort/complete, server SHA-256, published media, version history, download ticket single-use behavior, campaign analytics/frequency cap, feedback, notifications and admin authorization. The APK fixture has a ZIP local-file signature and deterministic bytes; it is an integrity/API fixture, not a valid installable APK or malware scan.
+The script first verifies the bot token with `getMe`, confirms the bot is an administrator in both test channels, and checks the real membership matrix for all three test users. This preflight runs before any D1 or R2 fixture is created, so invalid credentials or channel membership fail fast without leaving partial test data. It then explicitly enables subscription enforcement through the isolated admin setting before testing all/any behavior. The script verifies real Worker HTTP requests, D1 CRUD, channel membership via Telegram, all/any subscription behavior, two-part 9 MiB+ multipart create/part retry/abort/complete, server SHA-256, published media, version history, download ticket single-use behavior, campaign analytics/frequency cap, feedback, notifications and admin authorization. The APK fixture has a ZIP local-file signature and deterministic bytes; it is an integrity/API fixture, not a valid installable APK or malware scan.
 
 The script leaves all fixtures in the disposable database and bucket. After evidence is collected, delete the dedicated integration Worker, D1 database and R2 bucket in Cloudflare Dashboard. Do not run cleanup commands against production.
 

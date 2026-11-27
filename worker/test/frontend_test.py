@@ -7,6 +7,24 @@ HTML = (ROOT / "miniapp" / "index.html").read_text(encoding="utf-8")
 JS = (ROOT / "miniapp" / "script.js").read_text(encoding="utf-8")
 CSS = (ROOT / "miniapp" / "style.css").read_text(encoding="utf-8")
 
+INTEGRATION = (ROOT / "worker" / "test" / "real-integration.mjs").read_text(encoding="utf-8")
+
+class IntegrationHarnessAcceptanceTest(unittest.TestCase):
+    def test_telegram_preflight_happens_before_any_fixture_mutation(self):
+        preflight = INTEGRATION.index('const bot = await telegram("getMe")')
+        health = INTEGRATION.index('const health = await call("/api/health")')
+        first_user_write = INTEGRATION.index('const profile = await call("/api/me"')
+        self.assertLess(preflight, health)
+        self.assertLess(health, first_user_write)
+        self.assertIn('assert.ok(["creator", "administrator"].includes(botStatus.status)', INTEGRATION)
+        self.assertIn('assert.deepEqual(actual, account.expected', INTEGRATION)
+
+    def test_real_subscription_gate_is_explicitly_enabled_before_membership_matrix(self):
+        enable = INTEGRATION.index('"/api/admin/subscriptions-enabled"')
+        first_membership_check = INTEGRATION.index('const allStatus = await call("/api/subscription/status"')
+        self.assertLess(enable, first_membership_check)
+        self.assertIn('body: { enabled: true }', INTEGRATION)
+
 class MiniAppStaticAcceptanceTest(unittest.TestCase):
     def test_mobile_viewport_and_telegram_webapp_sdk_are_present(self):
         self.assertRegex(HTML, r'<meta[^>]+name="viewport"[^>]+width=device-width')

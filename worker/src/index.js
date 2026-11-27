@@ -144,7 +144,7 @@ async function authEndpoint(request,env,path,method) {
     return json({success:true,user,is_admin:true,session_token:token},200,{"set-cookie":sessionCookie(token)});
   }
   if(path==="/auth/logout"&&method==="POST"){
-    const token=cookieValue(request,"appnest_session") || (request.headers.get("Authorization")||"").replace(/^Bearer\\s+/i,"").trim();
+    const token=cookieValue(request,"appnest_session") || (request.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"").trim();
     if(token){const hash=hex(await crypto.subtle.digest("SHA-256",encoder.encode(token)));await env.DB.prepare("DELETE FROM appnest_auth_sessions WHERE token_hash=?").bind(hash).run();}
     return json({success:true},200,{"set-cookie":sessionCookie("",0)});
   }
@@ -170,7 +170,7 @@ async function rateLimit(env, key, limit = 60, windowSeconds = 60) {
 }
 async function auth(request, env) {
   const cookie=cookieValue(request,"appnest_session");
-  const bearer=(request.headers.get("Authorization")||"").match(/^Bearer\\s+([a-f0-9]{64})$/i)?.[1]||"";
+  const bearer=(request.headers.get("Authorization")||"").match(/^Bearer\s+([a-f0-9]{64})$/i)?.[1]||"";
   const sessionToken=bearer||cookie;
   // A cryptographically verified Telegram initData of a configured administrator always wins over a
   // pre-existing (e.g. guest) cookie session: this is the original "open the bot as admin" login.

@@ -63,6 +63,55 @@ function ok(result, expected, label) {
 }
 function passed(label) { console.log(`PASS  ${label}`); }
 
+// Preflight Telegram credentials, channel admin rights, and the expected real
+// membership matrix BEFORE creating any D1 rows or R2 objects. This prevents a
+// bad token/channel/account setup from leaving half-created integration fixtures.
+async function telegram(method, parameters = {}) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(parameters)
+    });
+    const payload = await response.json();
+    if (response.status === 429) {
+      const retryAfter = Number(payload?.parameters?.retry_after);
+      if (attempt === 0 && Number.isInteger(retryAfter) && retryAfter >= 0 && retryAfter <= 2) {
+        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+        continue;
+      }
+    }
+    assert.equal(response.ok && payload?.ok, true,
+      `Telegram ${method} preflight failed: ${payload?.description || `HTTP ${response.status}`}`);
+    return payload.result;
+  }
+  throw new Error(`Telegram ${method} preflight exhausted its bounded retry`);
+}
+const bot = await telegram("getMe");
+for (const channel of channels) {
+  const botStatus = await telegram("getChatMember", { chat_id: channel.chat_id, user_id: bot.id });
+  assert.ok(["creator", "administrator"].includes(botStatus.status),
+    `Test bot must be an administrator in ${channel.chat_id}`);
+}
+const isMember = status => ["creator", "administrator", "member"].includes(status.status) ||
+  (status.status === "restricted" && status.is_member === true);
+const expectedMembership = [
+  { id: memberAll, expected: [true, true], label: "member-all" },
+  { id: memberOne, expected: [true, false], label: "member-one" },
+  { id: nonmember, expected: [false, false], label: "nonmember" }
+];
+for (const account of expectedMembership) {
+  const actual = [];
+  for (const channel of channels) {
+    const status = await telegram("getChatMember", { chat_id: channel.chat_id, user_id: Number(account.id) });
+    actual.push(isMember(status));
+  }
+  assert.deepEqual(actual, account.expected,
+    `Telegram test account ${account.label} has the wrong channel membership; expected ${account.expected}, got ${actual}`);
+}
+passed("Telegram bot identity, channel admin permissions, and test-account membership preflight");
+
+// No database or object-storage fixtures have been created before the preflight above.
 const health = await call("/api/health");
 ok(health, 200, "isolated Worker health");
 assert.equal(health.data.status, "online");
@@ -92,6 +141,11 @@ passed("D1 category create/read/update");
 for (const channel of channels) {
   ok(await call("/api/admin/channels", { userId: adminId, method: "POST", body: channel }), 201, "create isolated required channel");
 }
+const gate = await call("/api/admin/subscriptions-enabled", {
+  userId: adminId, method: "PUT", body: { enabled: true }
+});
+ok(gate, 200, "enable subscription enforcement in isolated test environment");
+assert.equal(gate.data.enabled, true);
 ok(await call("/api/admin/subscription-mode", { userId: adminId, method: "PUT", body: { mode: "all" } }), 200, "set all-channel mode");
 const allStatus = await call("/api/subscription/status", { userId: memberAll });
 ok(allStatus, 200, "Telegram getChatMember for all-member account");

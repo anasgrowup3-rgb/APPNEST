@@ -42,10 +42,11 @@ The integration Worker has separate D1 and R2 resources. Never run destructive o
 
 ### Repository and CI
 
-- Current `main` commit after integration-harness hardening: `003b26f1a259f3f9dee612cf36b7803dd70c7df1`.
+- Current `main` commit after integration harness improvements: `bad23387fc9773f55ae6e773d22c76fac8de7e54`.
 - Previous `main` run inspected: `APPNEST validation`, run `45443270158`, completed successfully on 2026-11-24.
 - Retry-fix branch run `45927391825` passed on 2026-11-27.
-- Integration-preflight branch run `45964409937` passed on 2026-11-27: JavaScript syntax checks, **45 Worker tests**, and **21 Python tests** (including two new integration-harness acceptance checks).
+- Integration-preflight branch run `45964409937` passed on 2026-11-27: JavaScript syntax checks, **45 Worker tests**, and **21 Python tests**.
+- Storage-only integration branch run `45964760321` passed on 2026-11-27: JavaScript syntax checks, **45 Worker tests**, and **22 Python tests** (including guards for the storage-only/full Telegram test modes).
 - The migration smoke test uses an in-memory SQLite database. It proves that the checked-in SQL files apply together in that test database; it does not prove that the production D1 database has an identical legacy schema.
 - `worker/test/real-integration.mjs` exists for the isolated integration Worker. It requires dedicated test Telegram accounts, two test channels, and integration environment variables. Do not claim it passed unless it is actually run and its result is recorded.
 
@@ -304,4 +305,12 @@ Do not announce APPNEST as production-ready until all of these pass:
 - Merged PR #9 (`003b26f1...`) and deployed the same validated Worker source to the isolated integration Worker only. Production Worker and production D1/R2 were not changed in this step.
 - Re-checked the integration Worker deployment, D1 counts (zero test fixtures), and R2 privacy (`r2.dev` disabled; no custom domains).
 - Verified the integration bucket has managed `r2.dev` access disabled and no custom domains. Verified integration D1 has migrations 0001–0005 and zero fixture rows before this work.
-- The actual live test has not yet been run: it requires the dedicated test Telegram accounts/channels and a local `.env.integration` file. Never paste the bot token into chat or commit it.
+- The actual live test has not yet been run. The new storage-only mode needs a local `.env.integration`, the bot token, the configured admin Telegram ID, and one separate regular Telegram test account. The full membership mode additionally needs three distinct test users and two disposable channels. Never paste the bot token into chat or commit it.
+
+### 2026-11-27 — storage-only integration mode
+
+- Added a separate integration mode requiring only the configured admin and one regular test Telegram account. It validates D1, R2 multipart upload/retry/abort/complete, server-side SHA-256, publication, private media routes, one-time download tickets, ads/frequency caps, feedback, notifications, and admin authorization while explicitly disabling subscription enforcement.
+- Full Telegram membership mode remains available and still validates two channels with three distinct test users; it is not conflated with the storage-only mode.
+- Added static CI checks to ensure the mode is explicit, admin and regular user are different accounts, and subscription enforcement is disabled only in storage-only mode.
+- GitHub Actions run `45964760321` passed: 45 Worker tests and 22 Python tests. PR #10 merged as `bad23387...`.
+- The test harness is intentionally not auto-run in CI because it creates D1 records and R2 objects and requires real Telegram credentials. It must be run locally only after confirming the isolated Worker URL and private test resources.

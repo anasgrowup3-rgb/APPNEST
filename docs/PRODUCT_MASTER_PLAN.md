@@ -42,7 +42,7 @@ The integration Worker has separate D1 and R2 resources. Never run destructive o
 
 ### Repository and CI
 
-- Current `main` commit at inspection: `393cbdd8e1a7be491360d03dbc791af8e37fd1f6`.
+- Current `main` commit after the retry fix: `8b4711c22a2994e00283c5f7a74afa8fc1e4ded0`.
 - Previous `main` run inspected: `APPNEST validation`, run `45443270158`, completed successfully on 2026-11-24.
 - Current change-branch run: `APPNEST validation`, run `45927391825`, completed successfully on 2026-11-27.
 - Current branch CI passed JavaScript syntax checks, **45 Worker tests**, and **19 Python tests** (bot security, frontend static acceptance, and migration smoke tests).
@@ -65,7 +65,7 @@ The integration Worker has separate D1 and R2 resources. Never run destructive o
 - Production also contains pre-existing legacy tables whose names and columns differ from the original standalone migration schema. For example, the legacy `ad_campaigns` table is not the APPNEST table used by the Worker. The Worker currently reads and writes `appnest_ad_campaigns` and `appnest_ad_frequency`.
 - The production database does **not** have a `d1_migrations` ledger table. Its migration history cannot be inferred from a migration log; inspect actual table definitions before any production migration.
 - The integration database has a `d1_migrations` ledger. On 2026-11-27, the missing `0005_admin_recovery_codes.sql` migration was applied additively to the integration database and recorded as migration 5. The table and ledger row were then read back and verified.
-- No production records were deleted or modified during this inspection.
+- No production D1 records were deleted or modified during this inspection. The production Worker code was deployed separately after CI passed.
 
 ### Migration filenames — important clarification
 
@@ -270,6 +270,9 @@ Do not announce APPNEST as production-ready until all of these pass:
 - Found that `subscriptionCheck()` treated Telegram HTTP 429/5xx as unavailable without respecting `retry_after` or retrying transient errors. Added bounded retry handling and three regression tests on branch `fix/telegram-retry-and-plan-20261127`.
 - GitHub Actions run `45927391825` passed: syntax checks, 45 Worker tests, and 19 Python tests. No production Worker deployment was made.
 - Production catalogue remains empty. No fake apps were inserted.
+- After CI passed, deployed Worker version 53 (`b6caf66b-0bb9-4df5-a267-321e75a781e4`) to `appnest-api` at 100% traffic. Deployment ID: `c5bdc03e-b540-44fe-9f46-23834e1d596c`.
+- Re-read Worker settings after deployment and confirmed the existing `DB`, `FILES`, `ADMIN_IDS`, `ALLOWED_ORIGIN`, and `BOT_TOKEN` bindings remained present; compatibility date and usage model were preserved.
+- A live Telegram channel membership smoke test and public Mini App browser test remain outstanding; CI success and deployment acceptance are not substitutes for those tests.
 
 ### 2026-11-24 — APPNEST 2.0 visual redesign
 

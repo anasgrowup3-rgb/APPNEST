@@ -23,7 +23,7 @@ class IntegrationHarnessAcceptanceTest(unittest.TestCase):
         enable = INTEGRATION.index('"/api/admin/subscriptions-enabled"')
         first_membership_check = INTEGRATION.index('const allStatus = await call("/api/subscription/status"')
         self.assertLess(enable, first_membership_check)
-        self.assertIn('body: { enabled: true }', INTEGRATION)
+        self.assertIn('body: { enabled: !skipSubscriptionTests }', INTEGRATION)
     def test_storage_only_mode_is_explicit_and_uses_a_separate_user(self):
         self.assertIn('APPNEST_TEST_SKIP_SUBSCRIPTION_TESTS === "true"', INTEGRATION)
         self.assertIn('"APPNEST_TEST_USER_ID"', INTEGRATION)

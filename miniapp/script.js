@@ -126,11 +126,14 @@
       headers: {
         "Content-Type": "application/json",
         "X-Telegram-Init-Data": telegramAuthDisabled ? "" : initData,
+        ...( (()=>{ try { const token=localStorage.getItem("appnest-session-token"); return token ? {Authorization:"Bearer "+token} : {}; } catch { return {}; } })() ),
         ...(options.headers || {})
       }
     });
 
     const data = await response.json().catch(() => ({}));
+    if (data.session_token) { try { localStorage.setItem("appnest-session-token", data.session_token); } catch {} }
+    if (path === "/auth/logout" && response.ok) { try { localStorage.removeItem("appnest-session-token"); } catch {} }
 
     if (!response.ok) {
       const error = new Error(data.error || `Ошибка сервера (${response.status})`);

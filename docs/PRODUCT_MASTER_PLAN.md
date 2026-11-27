@@ -42,10 +42,10 @@ The integration Worker has separate D1 and R2 resources. Never run destructive o
 
 ### Repository and CI
 
-- Current `main` commit after the retry fix: `8b4711c22a2994e00283c5f7a74afa8fc1e4ded0`.
+- Current `main` commit after integration-harness hardening: `003b26f1a259f3f9dee612cf36b7803dd70c7df1`.
 - Previous `main` run inspected: `APPNEST validation`, run `45443270158`, completed successfully on 2026-11-24.
-- Current change-branch run: `APPNEST validation`, run `45927391825`, completed successfully on 2026-11-27.
-- Current branch CI passed JavaScript syntax checks, **45 Worker tests**, and **19 Python tests** (bot security, frontend static acceptance, and migration smoke tests).
+- Retry-fix branch run `45927391825` passed on 2026-11-27.
+- Integration-preflight branch run `45964409937` passed on 2026-11-27: JavaScript syntax checks, **45 Worker tests**, and **21 Python tests** (including two new integration-harness acceptance checks).
 - The migration smoke test uses an in-memory SQLite database. It proves that the checked-in SQL files apply together in that test database; it does not prove that the production D1 database has an identical legacy schema.
 - `worker/test/real-integration.mjs` exists for the isolated integration Worker. It requires dedicated test Telegram accounts, two test channels, and integration environment variables. Do not claim it passed unless it is actually run and its result is recorded.
 
@@ -275,6 +275,7 @@ Do not announce APPNEST as production-ready until all of these pass:
 - After CI passed, deployed Worker version 53 (`b6caf66b-0bb9-4df5-a267-321e75a781e4`) to `appnest-api` at 100% traffic. Deployment ID: `c5bdc03e-b540-44fe-9f46-23834e1d596c`.
 - Re-read Worker settings after deployment and confirmed the existing `DB`, `FILES`, `ADMIN_IDS`, `ALLOWED_ORIGIN`, and `BOT_TOKEN` bindings remained present; compatibility date and usage model were preserved.
 - A live Telegram channel membership smoke test and public Mini App browser test remain outstanding; CI success and deployment acceptance are not substitutes for those tests.
+- Production API remains on Worker version 53 (`b6caf66b-0bb9-4df5-a267-321e75a781e4`), deployment `c5bdc03e-b540-44fe-9f46-23834e1d596c`. Integration API is independently on version 7; its D1 and R2 bindings were re-read and verified as the integration resources.
 
 ### 2026-11-24 — APPNEST 2.0 visual redesign
 
@@ -299,5 +300,8 @@ Do not announce APPNEST as production-ready until all of these pass:
 - Updated the harness to preflight `getMe`, bot admin status in both channels, and the expected membership matrix for three separate test users before any D1/R2 mutations.
 - Added explicit isolated `subscriptions_enabled=true` setup before all/any membership tests.
 - Added static CI checks that enforce preflight-before-mutation and gate-enabled-before-membership-test ordering.
+- GitHub Actions run `45964409937` passed: 45 Worker tests and 21 Python tests.
+- Merged PR #9 (`003b26f1...`) and deployed the same validated Worker source to the isolated integration Worker only. Production Worker and production D1/R2 were not changed in this step.
+- Re-checked the integration Worker deployment, D1 counts (zero test fixtures), and R2 privacy (`r2.dev` disabled; no custom domains).
 - Verified the integration bucket has managed `r2.dev` access disabled and no custom domains. Verified integration D1 has migrations 0001–0005 and zero fixture rows before this work.
 - The actual live test has not yet been run: it requires the dedicated test Telegram accounts/channels and a local `.env.integration` file. Never paste the bot token into chat or commit it.

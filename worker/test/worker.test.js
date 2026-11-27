@@ -462,6 +462,109 @@ test("Telegram getChatMember mock enforces all and any subscription modes", asyn
   }
 });
 
+
+
+test("Telegram 429 retry_after is respected once when the wait is short", async () => {
+  const originalFetch=globalThis.fetch;
+  let calls=0;
+  const channel={chat_id:"@retry_channel",title:"Retry",invite_url:"https://t.me/retry_channel"};
+  const customEnv={
+    ...env(),
+    DB:{
+      prepare(sql){return{
+        bind(){return{
+          first:async()=>sql.includes("SELECT is_blocked")?{is_blocked:0}:sql.includes("SELECT count FROM appnest_rate_limits")?{count:1}:sql.includes("SELECT value FROM appnest_settings")?{value:"all"}:null,
+          all:async()=>({results:sql.includes("FROM appnest_required_channels")?[channel]:[]}),
+          run:async()=>({meta:{changes:1}})
+        };},
+        first:async()=>sql.includes("SELECT value FROM appnest_settings")?{value:"all"}:null,
+        all:async()=>({results:sql.includes("FROM appnest_required_channels")?[channel]:[]}),
+        run:async()=>({meta:{changes:1}})
+      };}
+    }
+  };
+  globalThis.fetch=async()=>{
+    calls++;
+    if(calls===1)return new Response(JSON.stringify({ok:false,error_code:429,parameters:{retry_after:1}}),{status:429,headers:{"content-type":"application/json"}});
+    return new Response(JSON.stringify({ok:true,result:{status:"member"}}),{status:200,headers:{"content-type":"application/json"}});
+  };
+  try{
+    const response=await call("/subscription/status",{initData:signedInitData(42),environment:customEnv});
+    assert.equal(response.status,200);
+    const data=await response.json();
+    assert.equal(calls,2);
+    assert.equal(data.allowed,true);
+    assert.equal(data.unavailable,false);
+  }finally{globalThis.fetch=originalFetch;}
+});
+
+test("Telegram 429 with a longer retry_after fails closed without a premature retry", async () => {
+  const originalFetch=globalThis.fetch;
+  let calls=0;
+  const channel={chat_id:"@slow_channel",title:"Slow",invite_url:"https://t.me/slow_channel"};
+  const customEnv={
+    ...env(),
+    DB:{
+      prepare(sql){return{
+        bind(){return{
+          first:async()=>sql.includes("SELECT is_blocked")?{is_blocked:0}:sql.includes("SELECT count FROM appnest_rate_limits")?{count:1}:sql.includes("SELECT value FROM appnest_settings")?{value:"all"}:null,
+          all:async()=>({results:sql.includes("FROM appnest_required_channels")?[channel]:[]}),
+          run:async()=>({meta:{changes:1}})
+        };},
+        first:async()=>sql.includes("SELECT value FROM appnest_settings")?{value:"all"}:null,
+        all:async()=>({results:sql.includes("FROM appnest_required_channels")?[channel]:[]}),
+        run:async()=>({meta:{changes:1}})
+      };}
+    }
+  };
+  globalThis.fetch=async()=>{
+    calls++;
+    return new Response(JSON.stringify({ok:false,error_code:429,parameters:{retry_after:5}}),{status:429,headers:{"content-type":"application/json"}});
+  };
+  try{
+    const response=await call("/subscription/status",{initData:signedInitData(42),environment:customEnv});
+    assert.equal(response.status,200);
+    const data=await response.json();
+    assert.equal(calls,1);
+    assert.equal(data.allowed,false);
+    assert.equal(data.unavailable,true);
+    assert.equal(data.channels[0].retry_after,5);
+  }finally{globalThis.fetch=originalFetch;}
+});
+
+test("Telegram 5xx response is retried once before failing or accepting membership", async () => {
+  const originalFetch=globalThis.fetch;
+  let calls=0;
+  const channel={chat_id:"@server_channel",title:"Server",invite_url:"https://t.me/server_channel"};
+  const customEnv={
+    ...env(),
+    DB:{
+      prepare(sql){return{
+        bind(){return{
+          first:async()=>sql.includes("SELECT is_blocked")?{is_blocked:0}:sql.includes("SELECT count FROM appnest_rate_limits")?{count:1}:sql.includes("SELECT value FROM appnest_settings")?{value:"all"}:null,
+          all:async()=>({results:sql.includes("FROM appnest_required_channels")?[channel]:[]}),
+          run:async()=>({meta:{changes:1}})
+        };},
+        first:async()=>sql.includes("SELECT value FROM appnest_settings")?{value:"all"}:null,
+        all:async()=>({results:sql.includes("FROM appnest_required_channels")?[channel]:[]}),
+        run:async()=>({meta:{changes:1}})
+      };}
+    }
+  };
+  globalThis.fetch=async()=>{
+    calls++;
+    if(calls===1)return new Response("temporary error",{status:503});
+    return new Response(JSON.stringify({ok:true,result:{status:"administrator"}}),{status:200,headers:{"content-type":"application/json"}});
+  };
+  try{
+    const response=await call("/subscription/status",{initData:signedInitData(42),environment:customEnv});
+    assert.equal(response.status,200);
+    const data=await response.json();
+    assert.equal(calls,2);
+    assert.equal(data.allowed,true);
+  }finally{globalThis.fetch=originalFetch;}
+});
+
 test("POST /auth/admin-telegram without initData is a 401 auth error, never 404", async () => {
   const response = await call("/auth/admin-telegram", { method: "POST", body: {} });
   assert.equal(response.status, 401);

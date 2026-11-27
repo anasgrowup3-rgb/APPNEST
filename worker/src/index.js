@@ -217,15 +217,40 @@ async function subscriptionCheck(env, userId) {
   if (!env.BOT_TOKEN) return { allowed: false, unavailable: true, channels: results };
   const checks = await Promise.all(results.map(async channel => {
     try {
-      const response = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getChatMember`, {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chat_id: channel.chat_id, user_id: Number(userId) })
-      });
-      if (!response.ok) throw new Error("Telegram unavailable");
-      const payload = await response.json();
-      if (!payload.ok) throw new Error("Telegram unavailable");
-      const status = payload.result?.status;
-      return { ...channel, subscribed: ["creator","administrator","member"].includes(status) || (status === "restricted" && payload.result?.is_member === true) };
+      // Telegram documents retry_after in ResponseParameters for flood-control errors.
+      // Retry once only when Telegram asks us to wait no more than one second; longer
+      // waits fail closed and are returned to the client instead of holding a Worker open.
+      const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+      for (let attempt = 0; attempt < 2; attempt++) {
+        let response, payload;
+        try {
+          response = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getChatMember`, {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ chat_id: channel.chat_id, user_id: Number(userId) })
+          });
+          payload = await response.json();
+        } catch (error) {
+          if (attempt === 0) { await pause(250); continue; }
+          throw error;
+        }
+        if (response.status === 429) {
+          const retryAfter = Number(payload?.parameters?.retry_after);
+          if (attempt === 0 && Number.isInteger(retryAfter) && retryAfter >= 0 && retryAfter <= 1) {
+            await pause(retryAfter * 1000);
+            continue;
+          }
+          return { ...channel, subscribed: false, unavailable: true,
+            ...(Number.isInteger(retryAfter) && retryAfter >= 0 ? { retry_after: retryAfter } : {}) };
+        }
+        if (response.status >= 500 && response.status <= 599 && attempt === 0) {
+          await pause(250);
+          continue;
+        }
+        if (!response.ok || !payload?.ok) throw new Error("Telegram unavailable");
+        const status = payload.result?.status;
+        return { ...channel, subscribed: ["creator","administrator","member"].includes(status) || (status === "restricted" && payload.result?.is_member === true) };
+      }
+      throw new Error("Telegram unavailable");
     } catch { return { ...channel, subscribed: false, unavailable: true }; }
   }));
   const mode = await env.DB.prepare("SELECT value FROM appnest_settings WHERE key='subscription_mode'").first();

@@ -59,6 +59,26 @@ test("guest access creates a server session without email or Telegram", async ()
   assert.equal(data.success, true);
   assert.equal(data.guest, true);
   assert.equal(data.is_admin, false);
+  assert.match(data.session_token || "", /^[a-f0-9]{64}$/);
+});
+test("bearer session authenticates when cross-site cookies are unavailable", async () => {
+  const token = "a".repeat(64);
+  const environment = env();
+  const originalPrepare = environment.DB.prepare.bind(environment.DB);
+  environment.DB.prepare = sql => {
+    if (sql.includes("SELECT user_id,expires_at FROM appnest_auth_sessions")) {
+      return { bind: () => ({ first: async () => ({ user_id: "guest_test", expires_at: Math.floor(Date.now()/1000)+3600 }) }) };
+    }
+    if (sql.includes("SELECT u.telegram_id,u.username")) {
+      return { bind: () => ({ first: async () => ({ telegram_id:"guest_test", username:"", first_name:"Гость", last_name:"", photo_url:"", email:"" }) }) };
+    }
+    return originalPrepare(sql);
+  };
+  const response = await call("/me", { headers: { Authorization: "Bearer " + token }, environment });
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.equal(data.user.id, "guest_test");
+  assert.equal(data.is_admin, false);
 });
 test("cross-origin state-changing requests are rejected", async () => {
   const denied=await call("/auth/guest",{method:"POST",body:{},headers:{Origin:"https://attacker.example"}});
